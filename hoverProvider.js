@@ -5,11 +5,11 @@ const vscode = require('vscode');
 
 const hoverProvider = {
   provideHover(document, position) {
-
     const line = document.lineAt(position);
     const lineText = line.text;
     const pattern = /- template:\s*(.*)/;
     const match = pattern.exec(lineText);
+
     if (match) {
       const filename = match[1];
        // Read the contents of the YAML file
@@ -38,6 +38,15 @@ const hoverProvider = {
       if (parameters.length > 0) {
         try {
             const hoverMarkdown = new vscode.MarkdownString(parameters.join('\n'));
+            //hoverMarkdown.isTrusted = true;
+            vscode.window.showInformationMessage('Click to open template', 'Open').then(choice => {
+              if (choice === 'Open') {
+                const filePath = path.join(__dirname, '../testcase', filename);
+                vscode.workspace.openTextDocument(filePath).then(doc => {
+                    vscode.window.showTextDocument(doc);
+                });
+              }
+            });
             return new vscode.Hover(hoverMarkdown);
         } catch (error) {
             console.error('Failed to create MarkdownString:', error);
