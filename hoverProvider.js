@@ -4,34 +4,33 @@ const path = require('path');
 const vscode = require('vscode');
 
 const hoverProvider = {
-  provideHover(document, position, token) {
+  provideHover(document, position) {
     const wordRange = document.getWordRangeAtPosition(position);
-    const currentWord = document.getText(wordRange);
 
-    if (currentWord === 'hello') {
-      console.log('Hello word found in hello.yaml!');
-      // Read the contents of the YAML file
-      //const filePath = path.join(__dirname, '..', 'hello.yaml');
-
-      const filePath = 'C:/Users/UL93PI/hello.yaml'
+    const line = document.lineAt(position);
+    const lineText = line.text;
+    const pattern = /- template:\s*(.*)/;
+    const match = pattern.exec(lineText);
+    if (match) {
+      const filename = match[1];
+       // Read the contents of the YAML file
+       const filePath = path.join(__dirname, '../testcase', filename);
+       let yamlText = null;
+       try {
+         yamlText = fs.readFileSync(filePath, 'utf-8');
+         console.log(filePath, 'successfully read!');
+       } catch (e) {
+         console.error(`Failed to read YAML file: ${e}`);
+       }
       
-      let yamlText = null;
-      try {
-        yamlText = fs.readFileSync(filePath, 'utf-8');
-        console.log('Hello.yaml successfully read!');
-      } catch (e) {
-        console.error(`Failed to read YAML file: ${e}`);
-      }
-
-      // Parse the YAML text and create a list of parameter names and types
+       // Parse the YAML text and create a list of parameter names and types
       const parameters = [];
       if (yamlText) {
         const yamlObject = yaml.load(yamlText);
         if (yamlObject.parameters) {
-          console.log('if (yamlObject.parameters) seems to work');
           for (const parameter of yamlObject.parameters) {
             const name = parameter.name || '';
-            const type = parameter.type || 'string';
+            const type = parameter.type || 'TYPE NOT SET';
             parameters.push(`- **${name}**: ${type}`);
           }
         }
@@ -39,7 +38,6 @@ const hoverProvider = {
 
       if (parameters.length > 0) {
         try {
-            console.log('GOOD');
             const hoverMarkdown = new vscode.MarkdownString(parameters.join('\n'));
             return new vscode.Hover(hoverMarkdown);
         } catch (error) {
@@ -50,8 +48,7 @@ const hoverProvider = {
         console.log('parameters.length is not greater than 0');
         return null;
       }
-    } else {
-      return null;
+
     }
   }
 };
