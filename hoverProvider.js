@@ -5,7 +5,6 @@ const vscode = require('vscode');
 
 const hoverProvider = {
   provideHover(document, position) {
-    const wordRange = document.getWordRangeAtPosition(position);
 
     const line = document.lineAt(position);
     const lineText = line.text;
