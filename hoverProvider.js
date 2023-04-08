@@ -44,7 +44,7 @@ const hoverProvider = {
       let yamlObject;
       if (yamlText) {
         try{
-
+          
           const options = { schema: yaml.JSON_SCHEMA, json: true };
           yamlObject = yaml.load(yamlText,options);
 
@@ -72,14 +72,21 @@ const hoverProvider = {
             return null;
           }
         }
+        
+        let lines = yamlText.split('\n');
 
-        if (yamlObject.parameters) {
-          for (const parameter of yamlObject.parameters) {
-            const name = parameter.name || '';
-            const type = parameter.type || 'TYPE NOT SET';
-            parameters.push(`- **${name}**: ${type}`);
-          }
+        for (const parameter of yamlObject.parameters) {
+          const name = parameter.name;
+          const type = parameter.type;
+
+          let lineNumber = lines.findIndex(line => line.includes("- name: " + name));
+          let isRequired = lines[lineNumber - 1].includes('# REQUIRED');
+          //console.log('param ' + parameter.name, 'found at line: ' + lineNumber, 'isRequired?: ' + isRequired);  
+          
+          const description = (isRequired == true) ? ', REQUIRED' : '';
+          parameters.push(`- **${name}**: ${type}${description}`);
         }
+
       }
 
       if (parameters.length > 0) {
