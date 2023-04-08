@@ -5,6 +5,7 @@ const vscode = require('vscode');
 
 const hoverProvider = {
   provideHover(document, position) {
+    const workspaceFolder = vscode.workspace.workspaceFolders[0].uri.fsPath;
     const line = document.lineAt(position);
     const lineText = line.text;
     const pattern = /- template:\s*(.*)/;
@@ -13,11 +14,8 @@ const hoverProvider = {
 
     if (match) {
       const filename = match[1];
-      //console.log('filename:',filename);
-      
-      // Depending on whether the filename begins with / or not, change path
-      // If starts with / then all good, append workspace path to template path 
-      const workspaceFolder = vscode.workspace.workspaceFolders[0].uri.fsPath;
+      vscode.workspace.getConfiguration().update('workbench.editor.enablePreview', false, vscode.ConfigurationTarget.openTextDocument);
+
       let filePath;
       if (filename.startsWith('/')) {
         filePath = path.join(workspaceFolder,'/', filename);
@@ -43,8 +41,35 @@ const hoverProvider = {
       
        // Parse the YAML text and create a list of parameter names and types
       const parameters = [];
+      let yamlObject;
       if (yamlText) {
-        const yamlObject = yaml.load(yamlText);
+        try{
+          yamlObject = yaml.load(yamlText);
+        } catch (e) {
+          if (e instanceof yaml.YAMLException) {
+            console.error(`Error parsing YAML: ${e.message}. Error at line ${e.mark.line}.`);
+            const hoverMarkdown = new vscode.MarkdownString(`Duplicate mapping at line ${e.mark.line +1}`);
+            vscode.window.showInformationMessage("Cannot parse " + filename + ". Duplicated line in the YAML template file. YAML disallows duplicate keys", 'Open').then(choice => {
+              if (choice === 'Open') {
+                vscode.workspace.openTextDocument(filePath).then(doc => {
+                    vscode.window.showTextDocument(doc);
+                });
+              }
+            });
+            return new vscode.Hover(hoverMarkdown);
+          } else {
+            console.error(`Error: ${e.message}`);
+            vscode.window.showInformationMessage("There is an error during YAML loading, cannot parse " + filename, 'Open').then(choice => {
+              if (choice === 'Open') {
+                vscode.workspace.openTextDocument(filePath).then(doc => {
+                    vscode.window.showTextDocument(doc);
+                });
+              }
+            });
+            return null;
+          }
+        }
+
         if (yamlObject.parameters) {
           for (const parameter of yamlObject.parameters) {
             const name = parameter.name || '';
@@ -70,8 +95,8 @@ const hoverProvider = {
             return null;
         }
       } else {
-        const hoverMarkdown = new vscode.MarkdownString("No parameters in template");
-        vscode.window.showInformationMessage("No parameters found in template" + filename, 'Open').then(choice => {
+        const hoverMarkdown = new vscode.MarkdownString("No parameters in template ");
+        vscode.window.showInformationMessage("No parameters found in template " + filename, 'Open').then(choice => {
           if (choice === 'Open') {
             vscode.workspace.openTextDocument(filePath).then(doc => {
                 vscode.window.showTextDocument(doc);
