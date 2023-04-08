@@ -8,18 +8,23 @@ const hoverProvider = {
     const line = document.lineAt(position);
     const lineText = line.text;
     const pattern = /- template:\s*(.*)/;
+    //const pattern = /(?:- )?(templateName|template):?\s*(.*)/;
     const match = pattern.exec(lineText);
 
     if (match) {
       const filename = match[1];
+      console.log(filename);
        // Read the contents of the YAML file
-       const filePath = path.join(__dirname, '../testcase', filename);
+       const filePath = path.join(__dirname, filename);
+       console.log(filePath);
        let yamlText = null;
        try {
          yamlText = fs.readFileSync(filePath, 'utf-8');
          console.log(filePath, 'successfully read!');
        } catch (e) {
-         console.error(`Failed to read YAML file: ${e}`);
+         console.error(`Failed to read template: ${e}`);
+         vscode.window.showInformationMessage('Failed to read template:',filePath);
+         return null;
        }
       
        // Parse the YAML text and create a list of parameter names and types
@@ -41,7 +46,6 @@ const hoverProvider = {
             //hoverMarkdown.isTrusted = true;
             vscode.window.showInformationMessage('Click to open template', 'Open').then(choice => {
               if (choice === 'Open') {
-                const filePath = path.join(__dirname, '../testcase', filename);
                 vscode.workspace.openTextDocument(filePath).then(doc => {
                     vscode.window.showTextDocument(doc);
                 });
@@ -49,11 +53,11 @@ const hoverProvider = {
             });
             return new vscode.Hover(hoverMarkdown);
         } catch (error) {
-            console.error('Failed to create MarkdownString:', error);
+            console.error('Failed to create markdown string:', error);
             return null;
         }
       } else {
-        console.log('parameters.length is not greater than 0');
+        vscode.window.showInformationMessage('No parameters found in template!',filePath);
         return null;
       }
 
