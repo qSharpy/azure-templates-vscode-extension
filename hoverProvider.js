@@ -12,15 +12,16 @@ const hoverProvider = {
     const match = pattern.exec(lineText);
 
     if (match) {
+      const workspaceFolder = vscode.workspace.workspaceFolders[0].uri.fsPath;
       const filename = match[1];
-      console.log(filename);
+
        // Read the contents of the YAML file
-       const filePath = path.join(__dirname, filename);
-       console.log(filePath);
+       const filePath = path.join(workspaceFolder,'/', filename);
+       console.log('filepath: ',filePath);
+
        let yamlText = null;
        try {
          yamlText = fs.readFileSync(filePath, 'utf-8');
-         console.log(filePath, 'successfully read!');
        } catch (e) {
          console.error(`Failed to read template: ${e}`);
          vscode.window.showInformationMessage('Failed to read template:',filePath);
