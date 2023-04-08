@@ -2,14 +2,14 @@ const vscode = require('vscode');
 const hoverProvider = require('./hoverProvider');
 
 function activate(context) {
-  console.log('Hello extension activated');
+  console.log('Azure Templates Navigator activated');
 
   const disposable = vscode.languages.registerHoverProvider('yaml', hoverProvider);
   context.subscriptions.push(disposable);
 }
 
 function deactivate() {
-  console.log('Hello extension deactivated');
+  console.log('Azure Templates Navigator deactivated');
 }
 
 module.exports = {
