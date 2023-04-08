@@ -12,13 +12,26 @@ const hoverProvider = {
     const match = pattern.exec(lineText);
 
     if (match) {
-      const workspaceFolder = vscode.workspace.workspaceFolders[0].uri.fsPath;
       const filename = match[1];
-
+      //console.log('filename:',filename);
+      
+      // Depending on whether the filename begins with / or not, change path
+      // If starts with / then all good, append workspace path to template path 
+      const workspaceFolder = vscode.workspace.workspaceFolders[0].uri.fsPath;
+      let filePath;
+      if (filename.startsWith('/')) {
+        filePath = path.join(workspaceFolder,'/', filename);
+      } else {
+        // Get the active text editor
+        const editor = vscode.window.activeTextEditor;
+        const fileUri = editor.document.uri;
+        filePath = fileUri.fsPath;
+        filePath = path.join(fileUri.fsPath,'../', filename);
+      }
+      
+      console.log('filepath: ',filePath);
+      
        // Read the contents of the YAML file
-       const filePath = path.join(workspaceFolder,'/', filename);
-       console.log('filepath: ',filePath);
-
        let yamlText = null;
        try {
          yamlText = fs.readFileSync(filePath, 'utf-8');
@@ -44,8 +57,7 @@ const hoverProvider = {
       if (parameters.length > 0) {
         try {
             const hoverMarkdown = new vscode.MarkdownString(parameters.join('\n'));
-            //hoverMarkdown.isTrusted = true;
-            vscode.window.showInformationMessage('Click to open template', 'Open').then(choice => {
+            vscode.window.showInformationMessage("Open template " + filename, 'Open').then(choice => {
               if (choice === 'Open') {
                 vscode.workspace.openTextDocument(filePath).then(doc => {
                     vscode.window.showTextDocument(doc);
@@ -58,8 +70,16 @@ const hoverProvider = {
             return null;
         }
       } else {
-        vscode.window.showInformationMessage('No parameters found in template!',filePath);
-        return null;
+        const hoverMarkdown = new vscode.MarkdownString("No parameters in template");
+        vscode.window.showInformationMessage("No parameters found in template" + filename, 'Open').then(choice => {
+          if (choice === 'Open') {
+            vscode.workspace.openTextDocument(filePath).then(doc => {
+                vscode.window.showTextDocument(doc);
+            });
+          }
+        });
+
+        return new vscode.Hover(hoverMarkdown);
       }
 
     }
