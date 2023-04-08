@@ -3,9 +3,10 @@
     "type": "git",
     "url": "git://github.com/qSharpy/azure-templates-vscode-extension.git"
   },
-  "name": "anothertest",
-  "displayName": "anothertest",
-  "description": "",
+  "name": "azure-templates-navigator",
+  "displayName": "Azure Templates Navigator",
+  "publisher": "bogdanbujor",
+  "description": "With this extension you can more easily navigate through your azure pipeline templates.",
   "version": "0.0.1",
   "engines": {
     "vscode": "^1.77.0"
