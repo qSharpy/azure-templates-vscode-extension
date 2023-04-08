@@ -44,7 +44,10 @@ const hoverProvider = {
       let yamlObject;
       if (yamlText) {
         try{
-          yamlObject = yaml.load(yamlText);
+
+          const options = { schema: yaml.JSON_SCHEMA, json: true };
+          yamlObject = yaml.load(yamlText,options);
+
         } catch (e) {
           if (e instanceof yaml.YAMLException) {
             console.error(`Error parsing YAML: ${e.message}. Error at line ${e.mark.line}.`);
