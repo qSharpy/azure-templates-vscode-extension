@@ -79,26 +79,37 @@ const hoverProvider = {
           const name = parameter.name;
           const type = parameter.type;
 
-          let lineNumber = lines.findIndex(line => line.includes("- name: " + name));
-          let isRequired = lines[lineNumber - 1].includes('# REQUIRED');
-          //console.log('param ' + parameter.name, 'found at line: ' + lineNumber, 'isRequired?: ' + isRequired);  
-          
-          const description = (isRequired == true) ? ', REQUIRED' : '';
-          parameters.push(`- **${name}**: ${type}${description}`);
+          let description;
+          let lineNumber, isRequired;
+
+          try {
+            lineNumber = lines.findIndex(line => line.includes("- name: " + name));
+            isRequired = lines[lineNumber - 1].includes('# REQUIRED');
+          } catch(e) {
+            console.error (`Error parsing YAML: ${e.message}`);
+          }
+
+          description = (isRequired == true) ? '<span style="color:#cc0000;">required</span>' : '';
+          parameters.push(`- **${name}**: ${type} ${description}`);
+
         }
 
       }
-
+      
       if (parameters.length > 0) {
+
+        vscode.window.showInformationMessage('Open template: ' + filename, 'Open').then(choice => {
+          if (choice === 'Open') {
+            vscode.workspace.openTextDocument(filePath).then(doc => {
+                vscode.window.showTextDocument(doc);
+            });
+          }
+        });
+
         try {
             const hoverMarkdown = new vscode.MarkdownString(parameters.join('\n'));
-            vscode.window.showInformationMessage("Open template " + filename, 'Open').then(choice => {
-              if (choice === 'Open') {
-                vscode.workspace.openTextDocument(filePath).then(doc => {
-                    vscode.window.showTextDocument(doc);
-                });
-              }
-            });
+            hoverMarkdown.isTrusted = true;
+
             return new vscode.Hover(hoverMarkdown);
         } catch (error) {
             console.error('Failed to create markdown string:', error);
@@ -113,7 +124,6 @@ const hoverProvider = {
             });
           }
         });
-
         return new vscode.Hover(hoverMarkdown);
       }
 
