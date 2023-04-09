@@ -30,7 +30,7 @@
     "commands": [
       {
         "command": "azure-templates-navigator.setRequiredParameterColor",
-        "title": ": Set onHover parameter name color",
+        "title": "Set onHover parameter name color",
         "category": "Azure Templates Navigator"
       }
     ],
