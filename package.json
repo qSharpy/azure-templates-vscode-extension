@@ -7,12 +7,12 @@
   "displayName": "Azure Templates Navigator",
   "publisher": "bogdanbujor",
   "description": "With this extension you can more easily navigate through your azure pipeline templates.",
-  "version": "0.0.1",
+  "version": "1.0.0",
   "engines": {
     "vscode": "^1.77.0"
   },
   "categories": [
-    "Other"
+    "Azure"
   ],
   "activationEvents": [],
   "main": "./extension.js",

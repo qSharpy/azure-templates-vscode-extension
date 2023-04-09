@@ -4,17 +4,16 @@ With this extension you can more easily navigate through your azure pipeline tem
 
 ## Features
 
-Describe specific features of your extension including screenshots of your extension in action. Image paths are relative to this README file.
+Describe specific features of your extension including screenshmots of your extension in action. Image paths are relative to this README file.
 
-- highlight your template to see all your parameters inside
-- highlight and click on the window message from bottom right corner to open the template
-
+- hover your template path to see all your parameters inside
+- click on the window message from bottom right corner to open the template in a new window
 
 > Gif showing everything will come
 
 ## Requirements
 
-I think there's 1-2 packages that need to be installed. es-lint maybe?
+No requirements
 
 ## Known Issues
 
@@ -26,19 +25,21 @@ And not with:\
 
 ## Release Notes
 
-Release train
+See [changelog.md](CHANGELOG.md) for all release notes. Below you will find only the latest release notes.
 
-### 0.0.1
+## [1.0.0] - 09-03-2023
 
-Features:
-- Parameter highliting
-- Go to template
+### Added
+- Show template parameters on template path hover
+- Go to template using window message
+- Required parameters color highlighting
+- Required parameters highlight color is parametrized
+
 ---
-
+## Buy me a merdenea
+https://ko-fi.com/bogdanbujor
 
 ## For more information
 
 * [Visual Studio Code](https://code.visualstudio.com/)
 * [Extension API](https://code.visualstudio.com/api)
----
-**Enjoy!**
