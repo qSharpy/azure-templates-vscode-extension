@@ -17,6 +17,23 @@
   "activationEvents": [],
   "main": "./extension.js",
   "contributes": {
+    "configuration": {
+      "title": "My Extension",
+      "properties": {
+        "azure-templates-navigator.setRequiredParameterColor": {
+          "type": "string",
+          "default": "#c92d35",
+          "description": "Set the color of the required parameters"
+        }
+      }
+    },
+    "commands": [
+      {
+        "command": "azure-templates-navigator.setRequiredParameterColor",
+        "title": ": Set onHover parameter name color",
+        "category": "Azure Templates Navigator"
+      }
+    ],
     "languages": [
       {
         "id": "yaml",
