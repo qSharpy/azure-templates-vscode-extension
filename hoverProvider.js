@@ -29,7 +29,8 @@ const hoverProvider = {
         filePath = fileUri.fsPath;
         filePath = path.join(fileUri.fsPath,'../', filename);
       }
-      
+      //trim any whitespace from filepath:
+      filePath = filePath.trim();
       console.log('filepath: ',filePath);
       
        // Read the contents of the YAML file
@@ -41,7 +42,7 @@ const hoverProvider = {
          vscode.window.showInformationMessage('Failed to read template:',filePath);
          return null;
        }
-      
+
        // Parse the YAML text and create a list of parameter names and types
       const parameters = [];
       let yamlObject;
