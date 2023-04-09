@@ -6,6 +6,7 @@
   "name": "azure-templates-navigator",
   "displayName": "Azure Templates Navigator",
   "publisher": "bogdanbujor",
+  "icon": "logo.png",
   "description": "With this extension you can more easily navigate through your azure pipeline templates.",
   "version": "1.0.0",
   "engines": {
