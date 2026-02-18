@@ -1,0 +1,50 @@
+parameters:
+  # REQUIRED
+  - name: webhookUrl
+    type: string
+  # REQUIRED
+  - name: message
+    type: string
+  - name: title
+    type: string
+    default: 'Pipeline Notification'
+  - name: themeColor
+    type: string
+    default: '0076D7'
+  - name: includeRunLink
+    type: boolean
+    default: true
+
+steps:
+  - task: PowerShell@2
+    displayName: 'Send Teams Notification'
+    inputs:
+      targetType: 'inline'
+      script: |
+        $body = @{
+          "@type" = "MessageCard"
+          "@context" = "http://schema.org/extensions"
+          "themeColor" = "${{ parameters.themeColor }}"
+          "summary" = "${{ parameters.title }}"
+          "sections" = @(
+            @{
+              "activityTitle" = "${{ parameters.title }}"
+              "facts" = @(
+                @{
+                  "name" = "Message"
+                  "value" = "${{ parameters.message }}"
+                }
+                @{
+                  "name" = "Pipeline"
+                  "value" = "$(Build.DefinitionName)"
+                }
+                @{
+                  "name" = "Build"
+                  "value" = "$(Build.BuildNumber)"
+                }
+              )
+            }
+          )
+        }
+        $json = $body | ConvertTo-Json -Depth 10
+        Invoke-RestMethod -Uri "${{ parameters.webhookUrl }}" -Method Post -Body $json -ContentType "application/json"

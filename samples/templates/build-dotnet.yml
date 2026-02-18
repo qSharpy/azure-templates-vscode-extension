@@ -1,0 +1,53 @@
+parameters:
+  # REQUIRED
+  - name: project
+    type: string
+  # REQUIRED
+  - name: buildConfiguration
+    type: string
+  - name: dotnetVersion
+    type: string
+    default: '8.0.x'
+  - name: restoreNuget
+    type: boolean
+    default: true
+  - name: publishArtifact
+    type: boolean
+    default: true
+  - name: artifactName
+    type: string
+    default: 'drop'
+
+steps:
+  - task: UseDotNet@2
+    displayName: 'Install .NET SDK ${{ parameters.dotnetVersion }}'
+    inputs:
+      packageType: 'sdk'
+      version: '${{ parameters.dotnetVersion }}'
+
+  - ${{ if eq(parameters.restoreNuget, true) }}:
+    - task: DotNetCoreCLI@2
+      displayName: 'Restore NuGet packages'
+      inputs:
+        command: 'restore'
+        projects: '${{ parameters.project }}'
+
+  - task: DotNetCoreCLI@2
+    displayName: 'Build ${{ parameters.project }}'
+    inputs:
+      command: 'build'
+      projects: '${{ parameters.project }}'
+      arguments: '--configuration ${{ parameters.buildConfiguration }} --no-restore'
+
+  - ${{ if eq(parameters.publishArtifact, true) }}:
+    - task: DotNetCoreCLI@2
+      displayName: 'Publish'
+      inputs:
+        command: 'publish'
+        projects: '${{ parameters.project }}'
+        arguments: '--configuration ${{ parameters.buildConfiguration }} --output $(Build.ArtifactStagingDirectory)'
+    - task: PublishBuildArtifacts@1
+      displayName: 'Publish Artifact: ${{ parameters.artifactName }}'
+      inputs:
+        PathtoPublish: '$(Build.ArtifactStagingDirectory)'
+        ArtifactName: '${{ parameters.artifactName }}'

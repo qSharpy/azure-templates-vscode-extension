@@ -1,211 +1,237 @@
-const yaml = require('js-yaml');
+'use strict';
+
 const fs = require('fs');
 const path = require('path');
 const vscode = require('vscode');
 
-const hoverProvider = {
-  provideHover(document, position) {
-    const config = vscode.workspace.getConfiguration('azure-templates-navigator');
-    const requiredParameterColor = config.get('setRequiredParameterColor');
+/**
+ * Parses Azure Pipeline template parameters from raw YAML text.
+ * We intentionally avoid a YAML library so there are zero runtime dependencies
+ * and the extension works straight from the marketplace without `npm install`.
+ *
+ * Azure Pipeline parameter blocks are well-structured:
+ *
+ *   parameters:
+ *     # REQUIRED          ← optional marker on the line BEFORE "- name:"
+ *     - name: myParam
+ *       type: string
+ *       default: 'foo'
+ *
+ * @param {string} text  Raw file contents
+ * @returns {{ name: string, type: string, default: string|undefined, required: boolean }[]}
+ */
+function parseParameters(text) {
+  const lines = text.split('\n');
+  const params = [];
 
-    const workspaceFolder = vscode.workspace.workspaceFolders[0].uri.fsPath;
-    const line = document.lineAt(position);
-    const lineText = line.text;
-    const pattern = /- template:\s*(.*)/;
-    //const pattern = /(?:- )?(templateName|template):?\s*(.*)/;
-    const match = pattern.exec(lineText);
+  // Find the "parameters:" block
+  let inParamsBlock = false;
+  let baseIndent = -1;
 
-    if (match) {
-      const filename = match[1];
-      vscode.workspace.getConfiguration().update('workbench.editor.enablePreview', false, vscode.ConfigurationTarget.openTextDocument);
+  for (let i = 0; i < lines.length; i++) {
+    const raw = lines[i];
+    const trimmed = raw.trimEnd();
 
-      let filePath;
-      if (filename.startsWith('/')) {
-        filePath = path.join(workspaceFolder,'/', filename);
-      } else {
-        // Get the active text editor
-        const editor = vscode.window.activeTextEditor;
-        const fileUri = editor.document.uri;
-        filePath = fileUri.fsPath;
-        filePath = path.join(fileUri.fsPath,'../', filename);
+    // Detect the top-level "parameters:" key
+    if (!inParamsBlock) {
+      if (/^parameters\s*:/.test(trimmed)) {
+        inParamsBlock = true;
       }
-      //trim any whitespace from filepath:
-      filePath = filePath.trim();
-      console.log('filepath: ',filePath);
-      
-       // Read the contents of the YAML file
-       let yamlText = null;
-       try {
-         yamlText = fs.readFileSync(filePath, 'utf-8');
-       } catch (e) {
-         console.error(`Failed to read template: ${e}`);
-         vscode.window.showInformationMessage('Failed to read template:',filePath);
-         return null;
-       }
-
-       // Parse the YAML text and create a list of parameter names and types
-      const parameters = [];
-      let yamlObject;
-      if (yamlText) {
-        try{
-          
-          const options = { schema: yaml.JSON_SCHEMA, json: true };
-          yamlObject = yaml.load(yamlText,options);
-
-        } catch (e) {
-          if (e instanceof yaml.YAMLException) {
-            console.error(`Error parsing YAML: ${e.message}. Error at line ${e.mark.line}.`);
-            const hoverMarkdown = new vscode.MarkdownString(`Duplicate mapping at line ${e.mark.line +1}`);
-            vscode.window.showInformationMessage("Cannot parse " + filename + ". Duplicated line in the YAML template file. YAML disallows duplicate keys", 'Open').then(choice => {
-              if (choice === 'Open') {
-                vscode.workspace.openTextDocument(filePath).then(doc => {
-                    vscode.window.showTextDocument(doc);
-                });
-              }
-            });
-            return new vscode.Hover(hoverMarkdown);
-          } else {
-            console.error(`Error: ${e.message}`);
-            vscode.window.showInformationMessage("There is an error during YAML loading, cannot parse " + filename, 'Open').then(choice => {
-              if (choice === 'Open') {
-                vscode.workspace.openTextDocument(filePath).then(doc => {
-                    vscode.window.showTextDocument(doc);
-                });
-              }
-            });
-            return null;
-          }
-        }
-        
-        // push parameters into 'parameters' variable to be shown in hover message
-        let lines = yamlText.split('\n');
-        for (const parameter of yamlObject.parameters) {
-          let name = parameter.name;
-          const type = parameter.type;
-          
-          let lineNumber, isRequired;
-          try {
-            lineNumber = lines.findIndex(line => line.includes("- name: " + name));
-            isRequired = lines[lineNumber - 1].includes('# REQUIRED');
-          } catch(e) {
-            console.error (`Error parsing YAML: ${e.message}`);
-          }
-
-          name = (isRequired == true) ? `<span style="color:${requiredParameterColor};">${parameter.name}</span>` : `<span style="color:#c8cdc4;">${parameter.name}</span>`;
-          parameters.push(`- **${name}**: ${type}`);
-        }
-
-      }
-      
-      if (parameters.length > 0) {
-        vscode.window.showInformationMessage('Open template: ' + filename, 'Open').then(choice => {
-          if (choice === 'Open') {
-            vscode.workspace.openTextDocument(filePath).then(doc => {
-                vscode.window.showTextDocument(doc);
-            });
-          }
-        });
-
-        try {
-            const hoverMarkdown = new vscode.MarkdownString(parameters.join('\n'));
-            hoverMarkdown.isTrusted = true;
-
-            return new vscode.Hover(hoverMarkdown);
-        } catch (error) {
-            console.error('Failed to create markdown string:', error);
-            return null;
-        }
-      } else {
-        const hoverMarkdown = new vscode.MarkdownString("No parameters in template ");
-        vscode.window.showInformationMessage("No parameters found in template " + filename, 'Open').then(choice => {
-          if (choice === 'Open') {
-            vscode.workspace.openTextDocument(filePath).then(doc => {
-                vscode.window.showTextDocument(doc);
-            });
-          }
-        });
-        return new vscode.Hover(hoverMarkdown);
-      }
-
+      continue;
     }
+
+    // Once inside the block, a non-indented non-empty line that isn't a list
+    // item means we've left the parameters block
+    if (trimmed.length > 0 && !/^\s/.test(trimmed) && !/^parameters\s*:/.test(trimmed)) {
+      break;
+    }
+
+    // Match a parameter entry: "  - name: foo"
+    const nameMatch = /^(\s*)-\s+name\s*:\s*(.+)$/.exec(trimmed);
+    if (!nameMatch) continue;
+
+    const indent = nameMatch[1].length;
+    if (baseIndent === -1) baseIndent = indent;
+
+    // Only process items at the same indent level (direct children)
+    if (indent !== baseIndent) continue;
+
+    const paramName = nameMatch[2].trim();
+
+    // Check if the line immediately before (skipping blank lines) is "# REQUIRED"
+    let required = false;
+    for (let j = i - 1; j >= 0; j--) {
+      const prev = lines[j].trim();
+      if (prev === '') continue;
+      if (/^#\s*REQUIRED\s*$/i.test(prev)) required = true;
+      break;
+    }
+
+    // Scan forward for type and default within this parameter's sub-block
+    let type = 'string';
+    let defaultValue;
+
+    for (let j = i + 1; j < lines.length; j++) {
+      const sub = lines[j].trimEnd();
+      if (sub.trim() === '') continue;
+
+      // If we hit another list item at the same indent, stop
+      const nextName = /^(\s*)-\s+name\s*:/.exec(sub);
+      if (nextName && nextName[1].length === baseIndent) break;
+
+      // If we hit a line with less or equal indent that isn't a sub-property, stop
+      const subIndent = sub.length - sub.trimStart().length;
+      if (subIndent <= baseIndent && sub.trim() !== '') break;
+
+      const typeMatch = /^\s+type\s*:\s*(.+)$/.exec(sub);
+      if (typeMatch) {
+        type = typeMatch[1].trim();
+        continue;
+      }
+
+      const defaultMatch = /^\s+default\s*:\s*(.*)$/.exec(sub);
+      if (defaultMatch) {
+        defaultValue = defaultMatch[1].trim();
+        continue;
+      }
+    }
+
+    params.push({ name: paramName, type, default: defaultValue, required });
+  }
+
+  return params;
+}
+
+/**
+ * Walks up the directory tree from `startDir` to find the nearest directory
+ * that contains a `.git` folder (i.e. the repo root).
+ * Falls back to `startDir` if no `.git` is found.
+ *
+ * @param {string} startDir
+ * @returns {string}
+ */
+function findRepoRoot(startDir) {
+  let dir = startDir;
+  while (true) {
+    if (fs.existsSync(path.join(dir, '.git'))) return dir;
+    const parent = path.dirname(dir);
+    if (parent === dir) return startDir; // reached filesystem root
+    dir = parent;
+  }
+}
+
+/**
+ * Resolves the absolute path of a template reference.
+ *
+ * Azure Pipelines path rules:
+ *   - Starts with "/"  → relative to the repository root (where .git lives),
+ *                        NOT the VS Code workspace root (which may be a subfolder)
+ *   - Otherwise        → relative to the directory of the file being hovered
+ *
+ * @param {string} templateRef   The raw string after "template:"
+ * @param {string} currentFile   Absolute path of the file being hovered
+ * @returns {string|null}
+ */
+function resolveTemplatePath(templateRef, currentFile) {
+  const ref = templateRef.trim();
+  if (!ref) return null;
+
+  if (ref.startsWith('/')) {
+    // Absolute path: resolve from the repo root (nearest .git ancestor)
+    const repoRoot = findRepoRoot(path.dirname(currentFile));
+    return path.join(repoRoot, ref.slice(1));
+  }
+
+  // Relative path: resolve from the directory of the current file
+  return path.join(path.dirname(currentFile), ref);
+}
+
+/**
+ * Builds the MarkdownString shown in the hover tooltip.
+ *
+ * @param {string} templateRef
+ * @param {{ name: string, type: string, default: string|undefined, required: boolean }[]} params
+ * @param {string} requiredColor  CSS hex color for required params
+ * @returns {vscode.MarkdownString}
+ */
+function buildHoverMarkdown(templateRef, params, requiredColor) {
+  const md = new vscode.MarkdownString(undefined, true);
+  md.isTrusted = true;
+  md.supportHtml = true;
+
+  // Header
+  md.appendMarkdown(`**📄 Template:** \`${templateRef.trim()}\`\n\n`);
+
+  if (params.length === 0) {
+    md.appendMarkdown('_No parameters defined_');
+    return md;
+  }
+
+  md.appendMarkdown('**Parameters:**\n\n');
+
+  for (const p of params) {
+    const nameHtml = p.required
+      ? `<span style="color:${requiredColor};">**${p.name}**</span>`
+      : `**${p.name}**`;
+
+    const badge = p.required ? ' _(required)_' : '';
+    const defaultPart = p.default !== undefined ? ` — default: \`${p.default}\`` : '';
+
+    md.appendMarkdown(`- ${nameHtml}: \`${p.type}\`${defaultPart}${badge}\n`);
+  }
+
+  return md;
+}
+
+/**
+ * The hover provider registered for YAML files.
+ */
+const hoverProvider = {
+  /**
+   * @param {vscode.TextDocument} document
+   * @param {vscode.Position} position
+   * @returns {vscode.Hover | undefined}
+   */
+  provideHover(document, position) {
+    const line = document.lineAt(position).text;
+
+    // Match:  "- template: path/to/template.yml"
+    // Also handles indented variants and optional leading "- "
+    const match = /(?:^|\s)-?\s*template\s*:\s*(.+)$/.exec(line);
+    if (!match) return undefined;
+
+    const templateRef = match[1];
+    const filePath = resolveTemplatePath(templateRef, document.uri.fsPath);
+
+    if (!filePath) return undefined;
+
+    // Read the template file
+    let text;
+    try {
+      text = fs.readFileSync(filePath, 'utf8');
+    } catch {
+      // File doesn't exist or can't be read — show a helpful message
+      const md = new vscode.MarkdownString(undefined, true);
+      md.isTrusted = true;
+      md.appendMarkdown(`**⚠️ Template not found:**\n\n\`${filePath}\``);
+      return new vscode.Hover(md);
+    }
+
+    const config = vscode.workspace.getConfiguration('azure-templates-navigator');
+    const requiredColor = config.get('requiredParameterColor', '#c92d35');
+
+    const params = parseParameters(text);
+    const hoverMarkdown = buildHoverMarkdown(templateRef, params, requiredColor);
+
+    // Provide a code lens range covering the whole "template:" token
+    const templateKeyStart = line.indexOf('template:');
+    const range = new vscode.Range(
+      position.line, templateKeyStart,
+      position.line, line.length
+    );
+
+    return new vscode.Hover(hoverMarkdown, range);
   }
 };
-
-vscode.commands.registerCommand('azure-templates-navigator.setRequiredParameterColor', async () => {
-  const config = vscode.workspace.getConfiguration('azure-templates-navigator');
-  const requiredParameterColor = config.get('setRequiredParameterColor');
-  
-  const colorList = {
-    pink: "#ff69b4",
-    blue: "#add8e6",
-    green: "#00ff00",
-    yellow: "#ffff00",
-    orange: "#ffa500",
-    purple: "#800080",
-    red: "#e84838",
-    //tesla deep red is the default color
-    tesla: "#c92d35",
-    default: "#c92d35"
-  };
-
-  const newValue = await vscode.window.showInputBox({
-    prompt: `Current value: ${requiredParameterColor}. Enter a new HEX value or choose from list below`,
-    placeHolder: 'extra list to choose from: default, random, blue, green, pink, purple, yellow, orange, tesla'
-  });
-
-  if (Object.keys(colorList).includes(newValue)) {
-    if (newValue === 'default'){
-      vscode.window.showInformationMessage(`Color set to default tesla red (${colorList[newValue]})`);
-    } else {
-        await config.update('setRequiredParameterColor', colorList[newValue], vscode.ConfigurationTarget.Global);
-        vscode.window.showInformationMessage(`Color set to ${newValue} (${colorList[newValue]})`);
-    }
-    return;
-  }
-
-  if(newValue === 'random') {
-    const letters = '0123456789ABCDEF';
-    let color = '#';
-    for (let i = 0; i < 6; i++) {
-      color += letters[Math.floor(Math.random() * 16)];
-    }
-    await config.update('setRequiredParameterColor', color, vscode.ConfigurationTarget.Global);
-    const responses = [
-      `Your new shiny color is ${color}`,
-      `It's official, your color is ${color}`,
-      `Congratulations, you have chosen ${color}`,
-      `Awesome, your new color is ${color}`,
-      `Say hello to your new color: ${color}`,
-      `You have great taste, your color is ${color}`,
-      `Exciting news! Your new color is ${color}`,
-      `Your style just got better with ${color}`,
-      `Get ready to rock your new color: ${color}`,
-      `I hope you like your new color: ${color}`,
-      `It's time to celebrate your new color: ${color}`,
-      `Your new color is making me jealous: ${color}`,
-      `Ultimate achievement. Dani Mocanu approved: ${color}`,
-      `You just upgraded your style with ${color}`,
-      `I'm impressed with your color choice: ${color}`,
-      `Your color game is strong: ${color}`,
-      `Nice choice, your color is ${color}`,
-      `You're going to love your new color: ${color}`,
-      `I have a feeling you'll look great in ${color}`,
-      `Your color selection is on point: ${color}`,
-      `Looking good in ${color}!`
-    ];
-    const randomIndex = Math.floor(Math.random() * responses.length);
-    vscode.window.showInformationMessage(responses[randomIndex]);
-    return;
-  }
-
-
-  if(/^#([0-9A-Fa-f]{3}){1,2}$/.test(newValue) == false){
-    vscode.window.showInformationMessage(`Not a hex value`);
-    return;
-  } else {
-      await config.update('setRequiredParameterColor', newValue, vscode.ConfigurationTarget.Global);
-      vscode.window.showInformationMessage(`Color set to ${newValue}`);
-    }
-});
 
 module.exports = hoverProvider;

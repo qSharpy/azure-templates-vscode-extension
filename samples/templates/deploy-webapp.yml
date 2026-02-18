@@ -1,0 +1,47 @@
+parameters:
+  # REQUIRED
+  - name: environment
+    type: string
+  # REQUIRED
+  - name: azureSubscription
+    type: string
+  # REQUIRED
+  - name: appName
+    type: string
+  - name: resourceGroup
+    type: string
+    default: ''
+  - name: slot
+    type: string
+    default: 'production'
+  - name: packagePath
+    type: string
+    default: '$(Pipeline.Workspace)/drop/**/*.zip'
+  - name: appType
+    type: string
+    default: 'webApp'
+    values:
+      - webApp
+      - webAppLinux
+      - functionApp
+      - functionAppLinux
+
+steps:
+  - task: DownloadBuildArtifacts@1
+    displayName: 'Download Artifact'
+    inputs:
+      buildType: 'current'
+      downloadType: 'single'
+      artifactName: 'drop'
+      downloadPath: '$(Pipeline.Workspace)'
+
+  - task: AzureWebApp@1
+    displayName: 'Deploy to ${{ parameters.environment }} - ${{ parameters.appName }}'
+    inputs:
+      azureSubscription: '${{ parameters.azureSubscription }}'
+      appType: '${{ parameters.appType }}'
+      appName: '${{ parameters.appName }}'
+      package: '${{ parameters.packagePath }}'
+      deployToSlotOrASE: ${{ ne(parameters.slot, 'production') }}
+      resourceGroupName: '${{ parameters.resourceGroup }}'
+      slotName: '${{ parameters.slot }}'

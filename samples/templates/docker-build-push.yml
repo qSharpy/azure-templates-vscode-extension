@@ -1,0 +1,50 @@
+parameters:
+  # REQUIRED
+  - name: repository
+    type: string
+  # REQUIRED
+  - name: dockerRegistryServiceConnection
+    type: string
+  - name: dockerfile
+    type: string
+    default: '**/Dockerfile'
+  - name: buildContext
+    type: string
+    default: '.'
+  - name: tags
+    type: object
+    default:
+      - '$(Build.BuildId)'
+      - 'latest'
+  - name: pushImage
+    type: boolean
+    default: true
+  - name: buildArgs
+    type: string
+    default: ''
+
+steps:
+  - task: Docker@2
+    displayName: 'Build Docker image - ${{ parameters.repository }}'
+    inputs:
+      containerRegistry: '${{ parameters.dockerRegistryServiceConnection }}'
+      repository: '${{ parameters.repository }}'
+      command: 'build'
+      Dockerfile: '${{ parameters.dockerfile }}'
+      buildContext: '${{ parameters.buildContext }}'
+      tags: |
+        ${{ each tag in parameters.tags }}:
+          ${{ tag }}
+      ${{ if ne(parameters.buildArgs, '') }}:
+        arguments: '${{ parameters.buildArgs }}'
+
+  - ${{ if eq(parameters.pushImage, true) }}:
+    - task: Docker@2
+      displayName: 'Push Docker image - ${{ parameters.repository }}'
+      inputs:
+        containerRegistry: '${{ parameters.dockerRegistryServiceConnection }}'
+        repository: '${{ parameters.repository }}'
+        command: 'push'
+        tags: |
+          ${{ each tag in parameters.tags }}:
+            ${{ tag }}

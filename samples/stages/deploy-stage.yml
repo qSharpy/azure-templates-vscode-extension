@@ -1,0 +1,50 @@
+parameters:
+  # REQUIRED
+  - name: environment
+    type: string
+  # REQUIRED
+  - name: azureSubscription
+    type: string
+  # REQUIRED
+  - name: appName
+    type: string
+  - name: dependsOn
+    type: object
+    default: []
+  - name: condition
+    type: string
+    default: 'succeeded()'
+  - name: vmImage
+    type: string
+    default: 'ubuntu-latest'
+
+stages:
+  - stage: 'Deploy_${{ parameters.environment }}'
+    displayName: 'Deploy to ${{ parameters.environment }}'
+    dependsOn: ${{ parameters.dependsOn }}
+    condition: ${{ parameters.condition }}
+    jobs:
+      - deployment: 'Deploy'
+        displayName: 'Deploy to ${{ parameters.environment }}'
+        environment: '${{ parameters.environment }}'
+        pool:
+          vmImage: '${{ parameters.vmImage }}'
+        strategy:
+          runOnce:
+            deploy:
+              steps:
+                - task: DownloadBuildArtifacts@1
+                  displayName: 'Download Artifact'
+                  inputs:
+                    buildType: 'current'
+                    downloadType: 'single'
+                    artifactName: 'drop'
+                    downloadPath: '$(Pipeline.Workspace)'
+
+                - task: AzureWebApp@1
+                  displayName: 'Deploy to ${{ parameters.appName }}'
+                  inputs:
+                    azureSubscription: '${{ parameters.azureSubscription }}'
+                    appType: 'webApp'
+                    appName: '${{ parameters.appName }}'
+                    package: '$(Pipeline.Workspace)/drop/**/*.zip'

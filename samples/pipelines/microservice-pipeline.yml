@@ -1,0 +1,67 @@
+trigger:
+  branches:
+    include:
+      - main
+      - feature/*
+
+pool:
+  vmImage: 'ubuntu-latest'
+
+variables:
+  serviceName: 'user-service'
+  dockerRegistry: 'myacr.azurecr.io'
+
+stages:
+  - stage: Build
+    displayName: 'Build Microservice'
+    jobs:
+      - job: BuildAndTest
+        displayName: 'Build, Test & Containerize'
+        steps:
+          # Relative path going up one level to templates/
+          - template: ../templates/build-dotnet.yml
+            parameters:
+              project: 'src/$(serviceName)/**/*.csproj'
+              buildConfiguration: 'Release'
+
+          - template: ../templates/run-tests.yml
+            parameters:
+              testProject: 'tests/$(serviceName).Tests/**/*.csproj'
+              collectCoverage: true
+              testFilter: 'Category!=Integration'
+
+          - template: ../templates/docker-build-push.yml
+            parameters:
+              repository: '$(dockerRegistry)/$(serviceName)'
+              dockerRegistryServiceConnection: 'ACR-ServiceConnection'
+              dockerfile: 'src/$(serviceName)/Dockerfile'
+              buildContext: '.'
+              pushImage: true
+
+          # Test the empty template (no parameters edge case)
+          - template: ../templates/empty-template.yml
+
+          # Notify on completion
+          - template: ../templates/notify-teams.yml
+            parameters:
+              webhookUrl: 'https://outlook.office.com/webhook/xxx'
+              message: 'Build completed for $(serviceName)'
+              title: '$(serviceName) Build Status'
+
+  # Absolute path reference for deploy stage
+  - template: /samples/stages/deploy-stage.yml
+    parameters:
+      environment: 'Development'
+      azureSubscription: 'Azure-Dev-ServiceConnection'
+      appName: '$(serviceName)-dev'
+      dependsOn:
+        - Build
+
+  - template: /samples/stages/deploy-stage.yml
+    parameters:
+      environment: 'Production'
+      azureSubscription: 'Azure-Prod-ServiceConnection'
+      appName: '$(serviceName)-prod'
+      dependsOn:
+        - Deploy_Development
+      condition: and(succeeded(), eq(variables['Build.SourceBranch'], 'refs/heads/main'))

@@ -1,0 +1,44 @@
+parameters:
+  # REQUIRED
+  - name: testProject
+    type: string
+  - name: buildConfiguration
+    type: string
+    default: 'Release'
+  - name: collectCoverage
+    type: boolean
+    default: true
+  - name: publishResults
+    type: boolean
+    default: true
+  - name: testFilter
+    type: string
+    default: ''
+
+steps:
+  - task: DotNetCoreCLI@2
+    displayName: 'Run Tests - ${{ parameters.testProject }}'
+    inputs:
+      command: 'test'
+      projects: '${{ parameters.testProject }}'
+      arguments: >-
+        --configuration ${{ parameters.buildConfiguration }}
+        ${{ if eq(parameters.collectCoverage, true) }}:
+          --collect:"XPlat Code Coverage"
+        ${{ if ne(parameters.testFilter, '') }}:
+          --filter "${{ parameters.testFilter }}"
+
+  - ${{ if eq(parameters.publishResults, true) }}:
+    - task: PublishTestResults@2
+      displayName: 'Publish Test Results'
+      inputs:
+        testResultsFormat: 'VSTest'
+        testResultsFiles: '**/*.trx'
+        mergeTestResults: true
+
+  - ${{ if eq(parameters.collectCoverage, true) }}:
+    - task: PublishCodeCoverageResults@1
+      displayName: 'Publish Code Coverage'
+      inputs:
+        codeCoverageTool: 'Cobertura'
+        summaryFileLocation: '$(Agent.TempDirectory)/**/coverage.cobertura.xml'

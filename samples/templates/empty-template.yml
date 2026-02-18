@@ -1,0 +1,5 @@
+parameters: []
+
+steps:
+  - script: echo "This template has no parameters"
+    displayName: 'Empty template step'
