@@ -48,7 +48,7 @@ Module._load  = function (request) {
   return _orig.apply(this, arguments);
 };
 
-const { parseParameters, parseRepositoryAliases, resolveTemplatePath } =
+const { parseParameters, parseRepositoryAliases, resolveTemplatePath, parseVariables, parsePassedParameters } =
   require('../../hoverProvider');
 
 Module._load = _orig; // restore immediately after require
@@ -399,5 +399,175 @@ describe('resolveTemplatePath', () => {
     assert.strictEqual(params.length, 3);
     assert.strictEqual(params[0].name,     'buildConfiguration');
     assert.strictEqual(params[0].required, true);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// parseVariables
+// ---------------------------------------------------------------------------
+
+describe('parseVariables', () => {
+
+  it('returns empty results when there is no variables block', () => {
+    const { variables, groups } = parseVariables('stages:\n  - stage: Build\n');
+    assert.deepStrictEqual(variables, {});
+    assert.deepStrictEqual(groups, []);
+  });
+
+  it('parses map-form variables', () => {
+    const yaml = `
+variables:
+  buildConfiguration: Release
+  dotnetVersion: 8.0.x
+  emptyVar:
+`;
+    const { variables, groups } = parseVariables(yaml);
+    assert.strictEqual(variables['buildConfiguration'].value, 'Release');
+    assert.strictEqual(variables['dotnetVersion'].value, '8.0.x');
+    assert.ok('emptyVar' in variables);
+    assert.deepStrictEqual(groups, []);
+  });
+
+  it('parses list-form variables with name/value', () => {
+    const yaml = `
+variables:
+  - name: buildConfiguration
+    value: Release
+  - name: dotnetVersion
+    value: 8.0.x
+`;
+    const { variables, groups } = parseVariables(yaml);
+    assert.strictEqual(variables['buildConfiguration'].value, 'Release');
+    assert.strictEqual(variables['dotnetVersion'].value, '8.0.x');
+    assert.deepStrictEqual(groups, []);
+  });
+
+  it('parses list-form variable groups', () => {
+    const yaml = `
+variables:
+  - name: buildConfiguration
+    value: Release
+  - group: my-variable-group
+  - group: another-group
+`;
+    const { variables, groups } = parseVariables(yaml);
+    assert.strictEqual(variables['buildConfiguration'].value, 'Release');
+    assert.strictEqual(groups.length, 2);
+    assert.strictEqual(groups[0].name, 'my-variable-group');
+    assert.strictEqual(groups[1].name, 'another-group');
+  });
+
+  it('records the correct line number for map-form variables', () => {
+    const yaml = `variables:\n  myVar: hello\n`;
+    const { variables } = parseVariables(yaml);
+    assert.ok('myVar' in variables);
+    assert.strictEqual(variables['myVar'].line, 1); // 0-based line 1
+  });
+
+  it('stops at the next top-level key after variables', () => {
+    const yaml = `
+variables:
+  buildConfig: Release
+stages:
+  - stage: Build
+`;
+    const { variables } = parseVariables(yaml);
+    assert.ok('buildConfig' in variables);
+    assert.ok(!('stage' in variables));
+  });
+
+  it('handles mixed list with groups and named variables', () => {
+    const yaml = `
+variables:
+  - group: shared-secrets
+  - name: appName
+    value: myapp
+  - group: env-config
+`;
+    const { variables, groups } = parseVariables(yaml);
+    assert.strictEqual(groups.length, 2);
+    assert.strictEqual(groups[0].name, 'shared-secrets');
+    assert.strictEqual(groups[1].name, 'env-config');
+    assert.strictEqual(variables['appName'].value, 'myapp');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// parsePassedParameters
+// ---------------------------------------------------------------------------
+
+describe('parsePassedParameters', () => {
+
+  it('returns {} when there is no parameters block after the template line', () => {
+    const lines = [
+      '- template: templates/build.yml',
+      '- template: templates/deploy.yml',
+    ];
+    const result = parsePassedParameters(lines, 0);
+    assert.deepStrictEqual(result, {});
+  });
+
+  it('parses simple key-value parameters', () => {
+    const lines = [
+      '- template: templates/build.yml',
+      '  parameters:',
+      '    project: "**/*.csproj"',
+      '    buildConfiguration: Release',
+    ];
+    const result = parsePassedParameters(lines, 0);
+    assert.ok('project' in result);
+    assert.ok('buildConfiguration' in result);
+    assert.strictEqual(result['buildConfiguration'].value, 'Release');
+    assert.strictEqual(result['buildConfiguration'].line, 3);
+  });
+
+  it('stops at the next sibling template line', () => {
+    const lines = [
+      '- template: templates/build.yml',
+      '  parameters:',
+      '    project: foo',
+      '- template: templates/deploy.yml',
+      '  parameters:',
+      '    environment: Production',
+    ];
+    const result = parsePassedParameters(lines, 0);
+    assert.ok('project' in result);
+    assert.ok(!('environment' in result));
+  });
+
+  it('stops when indentation returns to template level', () => {
+    const lines = [
+      '  - template: templates/build.yml',
+      '    parameters:',
+      '      project: foo',
+      '  - job: AnotherJob',
+    ];
+    const result = parsePassedParameters(lines, 0);
+    assert.ok('project' in result);
+    assert.ok(!('job' in result));
+  });
+
+  it('records the correct line number for each parameter', () => {
+    const lines = [
+      '- template: templates/build.yml',
+      '  parameters:',
+      '    alpha: one',
+      '    beta: two',
+    ];
+    const result = parsePassedParameters(lines, 0);
+    assert.strictEqual(result['alpha'].line, 2);
+    assert.strictEqual(result['beta'].line, 3);
+  });
+
+  it('handles parameters with pipeline expression values', () => {
+    const lines = [
+      '- template: templates/build.yml',
+      '  parameters:',
+      '    buildConfig: $(buildConfiguration)',
+      '    version: ${{ variables.dotnetVersion }}',
+    ];
+    const result = parsePassedParameters(lines, 0);
+    assert.strictEqual(result['buildConfig'].value, '$(buildConfiguration)');
+    assert.strictEqual(result['version'].value, '${{ variables.dotnetVersion }}');
   });
 });

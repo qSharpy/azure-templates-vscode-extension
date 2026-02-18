@@ -1,8 +1,8 @@
 {
   "name": "azure-templates-navigator",
   "displayName": "Azure Templates Navigator",
-  "description": "Hover over Azure Pipeline template references to instantly see their parameters. Click to open the template file.",
-  "version": "1.1.0",
+  "description": "Hover over Azure Pipeline template references to instantly see their parameters. Click to open the template file. Validates parameters, provides IntelliSense autocomplete, variable hover, and a template dependency tree view.",
+  "version": "1.3.0",
   "publisher": "bogdanbujor",
   "icon": "logo.png",
   "repository": {
@@ -14,6 +14,7 @@
   },
   "categories": [
     "Azure",
+    "Linters",
     "Other"
   ],
   "keywords": [
@@ -21,7 +22,10 @@
     "pipelines",
     "yaml",
     "templates",
-    "devops"
+    "devops",
+    "intellisense",
+    "diagnostics",
+    "autocomplete"
   ],
   "activationEvents": [
     "onLanguage:yaml"
@@ -35,6 +39,18 @@
           "type": "string",
           "default": "#c92d35",
           "description": "Hex color used to highlight required parameters in the hover tooltip."
+        },
+        "azure-templates-navigator.diagnostics.enabled": {
+          "type": "boolean",
+          "default": true,
+          "description": "Enable parameter validation diagnostics (missing required params, unknown params, type mismatches)."
+        },
+        "azure-templates-navigator.diagnostics.debounceMs": {
+          "type": "number",
+          "default": 500,
+          "minimum": 100,
+          "maximum": 5000,
+          "description": "Milliseconds to wait after a document change before re-running diagnostics."
         }
       }
     },
@@ -49,8 +65,43 @@
         "title": "Open Template File",
         "category": "Azure Templates Navigator",
         "icon": "$(go-to-file)"
+      },
+      {
+        "command": "azure-templates-navigator.refreshTemplateTree",
+        "title": "Refresh Template Tree",
+        "category": "Azure Templates Navigator",
+        "icon": "$(refresh)"
       }
     ],
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "azure-templates-navigator",
+          "title": "Azure Templates Navigator",
+          "icon": "$(list-tree)"
+        }
+      ]
+    },
+    "views": {
+      "azure-templates-navigator": [
+        {
+          "id": "azure-templates-navigator.templateTree",
+          "name": "Template Dependencies",
+          "contextualTitle": "Azure Templates Navigator",
+          "icon": "$(list-tree)",
+          "visibility": "visible"
+        }
+      ]
+    },
+    "menus": {
+      "view/title": [
+        {
+          "command": "azure-templates-navigator.refreshTemplateTree",
+          "when": "view == azure-templates-navigator.templateTree",
+          "group": "navigation"
+        }
+      ]
+    },
     "languages": [
       {
         "id": "yaml",

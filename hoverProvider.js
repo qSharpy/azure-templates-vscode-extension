@@ -199,6 +199,180 @@ function parseRepositoryAliases(text) {
 }
 
 /**
+ * Parses the top-level `variables:` block from a pipeline YAML document.
+ *
+ * Handles both map form and list form:
+ *
+ *   # Map form
+ *   variables:
+ *     buildConfiguration: Release
+ *     dotnetVersion: 8.0.x
+ *
+ *   # List form
+ *   variables:
+ *     - name: buildConfiguration
+ *       value: Release
+ *     - group: my-variable-group
+ *
+ * @param {string} text  Raw file contents of the pipeline YAML
+ * @returns {{
+ *   variables: Record<string, { value: string, line: number }>,
+ *   groups: { name: string, line: number }[]
+ * }}
+ */
+function parseVariables(text) {
+  const lines = text.split('\n');
+  const variables = {};
+  const groups = [];
+
+  let inVarsBlock = false;
+  let baseIndent = -1;
+  let isList = null; // true = list form, false = map form
+
+  // List-form state
+  let currentName = null;
+  let currentNameLine = -1;
+
+  for (let i = 0; i < lines.length; i++) {
+    const raw = lines[i];
+    const trimmed = raw.trimEnd();
+    const stripped = trimmed.trimStart();
+
+    if (!inVarsBlock) {
+      if (/^variables\s*:/.test(trimmed)) {
+        inVarsBlock = true;
+      }
+      continue;
+    }
+
+    // A non-indented non-empty line means we've left the variables block
+    if (trimmed.length > 0 && !/^\s/.test(trimmed)) {
+      break;
+    }
+
+    if (stripped === '') continue;
+
+    const lineIndent = trimmed.length - stripped.length;
+
+    // Determine form on first content line
+    if (isList === null && stripped !== '') {
+      isList = stripped.startsWith('- ') || stripped.startsWith('-\n');
+      if (baseIndent === -1) baseIndent = lineIndent;
+    }
+
+    if (!isList) {
+      // Map form: "  key: value"
+      if (lineIndent === baseIndent) {
+        const mapMatch = /^(\s*)(\w[\w.-]*)\s*:\s*(.*)$/.exec(trimmed);
+        if (mapMatch) {
+          variables[mapMatch[2]] = { value: mapMatch[3].trim(), line: i };
+        }
+      }
+    } else {
+      // List form
+      if (lineIndent === baseIndent) {
+        // New list item
+        const groupMatch = /^\s*-\s+group\s*:\s*(.+)$/.exec(trimmed);
+        if (groupMatch) {
+          groups.push({ name: groupMatch[1].trim(), line: i });
+          currentName = null;
+          continue;
+        }
+
+        const nameMatch = /^\s*-\s+name\s*:\s*(.+)$/.exec(trimmed);
+        if (nameMatch) {
+          currentName = nameMatch[1].trim();
+          currentNameLine = i;
+          continue;
+        }
+      }
+
+      // Sub-properties of a list item
+      if (currentName !== null && lineIndent > baseIndent) {
+        const valueMatch = /^\s+value\s*:\s*(.*)$/.exec(trimmed);
+        if (valueMatch) {
+          variables[currentName] = { value: valueMatch[1].trim(), line: currentNameLine };
+          currentName = null;
+        }
+      }
+    }
+  }
+
+  return { variables, groups };
+}
+
+/**
+ * Parses the parameters actually passed to a template at a specific call site.
+ *
+ * Given a document and the line number of the `- template:` line, scans the
+ * `parameters:` sub-block that follows and returns a map of name → { value, line }.
+ *
+ * Example:
+ *   - template: templates/build.yml   ← templateLine
+ *     parameters:
+ *       project: '**\/*.csproj'       ← captured
+ *       buildConfiguration: Release   ← captured
+ *
+ * @param {string[]} lines         All lines of the document
+ * @param {number}   templateLine  0-based index of the "- template:" line
+ * @returns {Record<string, { value: string, line: number }>}
+ */
+function parsePassedParameters(lines, templateLine) {
+  const passed = {};
+
+  // Determine the indent of the template line itself
+  const templateRaw = lines[templateLine];
+  const templateIndent = templateRaw.length - templateRaw.trimStart().length;
+
+  let inParamsBlock = false;
+  let paramsIndent = -1;
+
+  for (let i = templateLine + 1; i < lines.length; i++) {
+    const raw = lines[i];
+    const trimmed = raw.trimEnd();
+    const stripped = trimmed.trimStart();
+
+    if (stripped === '') continue;
+
+    const lineIndent = trimmed.length - stripped.length;
+
+    // If we've gone back to the template's indent level or shallower, we're done
+    if (lineIndent <= templateIndent && stripped !== '') {
+      break;
+    }
+
+    if (!inParamsBlock) {
+      // Look for "parameters:" at one indent level deeper than the template line
+      if (/^\s+parameters\s*:/.test(trimmed)) {
+        inParamsBlock = true;
+        paramsIndent = lineIndent;
+      }
+      continue;
+    }
+
+    // If we've gone back to or past the parameters: indent, we're done
+    if (lineIndent <= paramsIndent) break;
+
+    // Only capture direct children of the parameters block
+    if (lineIndent === paramsIndent + 2 || lineIndent === paramsIndent + 4) {
+      // Match "  paramName: value" — skip nested objects/arrays for now
+      const paramMatch = /^(\s+)([\w-]+)\s*:\s*(.*)$/.exec(trimmed);
+      if (paramMatch && lineIndent > paramsIndent) {
+        // Only capture at the first level below parameters:
+        if (paramsIndent !== -1 && lineIndent > paramsIndent) {
+          // Check it's a direct child (not a nested value)
+          if (!passed[paramMatch[2]] || lineIndent === paramsIndent + 2) {
+            passed[paramMatch[2]] = { value: paramMatch[3].trim(), line: i };
+          }
+        }
+      }
+    }
+  }
+
+  return passed;
+}
+
+/**
  * Walks up the directory tree from `startDir` to find the nearest directory
  * that contains a `.git` folder (i.e. the repo root).
  * Falls back to `startDir` if no `.git` is found.
@@ -340,6 +514,47 @@ function buildHoverMarkdown(templateRef, params, requiredColor, repoName, filePa
 }
 
 /**
+ * Builds a hover MarkdownString for a pipeline variable reference.
+ *
+ * @param {string} varName
+ * @param {{ value: string, line: number }|undefined} varInfo
+ * @param {{ name: string, line: number }[]} groups
+ * @returns {vscode.MarkdownString}
+ */
+function buildVariableHoverMarkdown(varName, varInfo, groups) {
+  const md = new vscode.MarkdownString(undefined, true);
+  md.isTrusted = true;
+  md.supportHtml = true;
+
+  // Check if it's a known system variable prefix
+  const systemPrefixes = ['Build.', 'System.', 'Agent.', 'Pipeline.', 'Environment.', 'Release.', 'Deployment.', 'Strategy.'];
+  const isSystem = systemPrefixes.some(p => varName.startsWith(p));
+
+  if (varInfo) {
+    md.appendMarkdown(`**📦 Variable:** \`${varName}\`\n\n`);
+    if (varInfo.value !== '') {
+      md.appendMarkdown(`**Value:** \`${varInfo.value}\`\n\n`);
+    } else {
+      md.appendMarkdown(`**Value:** _(empty string)_\n\n`);
+    }
+    md.appendMarkdown(`**Source:** pipeline \`variables:\` block (line ${varInfo.line + 1})\n`);
+  } else if (isSystem) {
+    md.appendMarkdown(`**📦 System variable:** \`${varName}\`\n\n`);
+    md.appendMarkdown(`Azure DevOps predefined variable — available at runtime.\n\n`);
+    md.appendMarkdown(`[View predefined variables ↗](https://learn.microsoft.com/en-us/azure/devops/pipelines/build/variables)`);
+  } else {
+    md.appendMarkdown(`**📦 Variable:** \`${varName}\`\n\n`);
+    md.appendMarkdown(`_Not found in the pipeline \`variables:\` block._\n\n`);
+    if (groups.length > 0) {
+      const groupNames = groups.map(g => `\`${g.name}\``).join(', ');
+      md.appendMarkdown(`May be defined in variable group(s): ${groupNames}`);
+    }
+  }
+
+  return md;
+}
+
+/**
  * The hover provider registered for YAML files.
  */
 const hoverProvider = {
@@ -350,7 +565,34 @@ const hoverProvider = {
    */
   provideHover(document, position) {
     const line = document.lineAt(position).text;
+    const docText = document.getText();
 
+    // ── Variable hover ────────────────────────────────────────────────────────
+    // Match $(varName) or ${{ variables.varName }}
+    const varSyntaxPatterns = [
+      /\$\(([\w.]+)\)/g,                    // $(varName)
+      /\$\{\{\s*variables\.([\w.]+)\s*\}\}/g, // ${{ variables.varName }}
+    ];
+
+    for (const pattern of varSyntaxPatterns) {
+      let m;
+      while ((m = pattern.exec(line)) !== null) {
+        const varName = m[1];
+        const start = m.index;
+        const end = m.index + m[0].length;
+
+        // Check if cursor is within this match
+        if (position.character >= start && position.character <= end) {
+          const { variables, groups } = parseVariables(docText);
+          const varInfo = variables[varName];
+          const hoverMd = buildVariableHoverMarkdown(varName, varInfo, groups);
+          const range = new vscode.Range(position.line, start, position.line, end);
+          return new vscode.Hover(hoverMd, range);
+        }
+      }
+    }
+
+    // ── Template hover ────────────────────────────────────────────────────────
     // Match:  "- template: path/to/template.yml"
     // Also handles indented variants and optional leading "- "
     const match = /(?:^|\s)-?\s*template\s*:\s*(.+)$/.exec(line);
@@ -359,7 +601,6 @@ const hoverProvider = {
     const templateRef = match[1].trim();
 
     // Parse repository aliases from the full document text
-    const docText = document.getText();
     const repoAliases = parseRepositoryAliases(docText);
 
     const resolved = resolveTemplatePath(templateRef, document.uri.fsPath, repoAliases);
@@ -445,9 +686,12 @@ const definitionProvider = {
 module.exports = {
   hoverProvider,
   definitionProvider,
-  // Export internals for unit testing
+  // Export internals for unit testing and reuse by other providers
   parseParameters,
   parseRepositoryAliases,
+  parseVariables,
+  parsePassedParameters,
   resolveTemplatePath,
   buildHoverMarkdown,
+  findRepoRoot,
 };

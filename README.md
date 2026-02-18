@@ -1,6 +1,8 @@
 # Azure Templates Navigator
 
-Hover over any `- template:` reference in an Azure Pipelines YAML file to instantly see the template's parameters — which are required, their types, and their default values.
+A must-have VS Code extension for anyone who develops, debugs, or reviews Azure Pipelines YAML files.
+
+Hover over any `- template:` reference to instantly see its parameters. Get real-time diagnostics for missing or unknown parameters. Autocomplete parameter names as you type. Hover over `$(variables)` to see their values. Explore the full template dependency tree in the sidebar — all with zero runtime dependencies.
 
 ![hover demo](logo.png)
 
@@ -8,18 +10,55 @@ Hover over any `- template:` reference in an Azure Pipelines YAML file to instan
 
 ## Features
 
-- **Hover tooltip** — shows all parameters defined in the referenced template
-- **Required parameter highlighting** — parameters marked with `# REQUIRED` above their `- name:` line are shown in a configurable color (default: red)
-- **Cross-repository template support** — resolves `@alias` references using `resources.repositories` declarations (see below)
-- **Zero dependencies** — no `npm install` needed; works straight from the marketplace
-- **Supports all path styles:**
-  - Relative: `- template: templates/build.yml` (resolved from the current file's directory)
-  - Absolute from repo root: `- template: /shared/templates/build.yml`
-  - Cross-repo: `- template: stages/build.yml@templates` (resolved from a sibling directory on disk)
+### 🔍 Template Parameter Hover
+Hover over any `- template:` line to see a tooltip with all parameters declared in the referenced template — their types, default values, and which are required.
+
+### 🔴 Parameter Validation Diagnostics
+Real-time squiggly-line diagnostics on every template call site:
+- **Error** — missing a required parameter
+- **Warning** — passing an unknown parameter not declared in the template
+- **Warning** — type mismatch (e.g. passing `'yes'` to a `boolean` parameter)
+
+Diagnostics update automatically as you type (debounced 500ms).
+
+### 💡 IntelliSense Autocomplete
+When typing inside the `parameters:` block under a `- template:` line, the extension offers autocomplete suggestions for every parameter declared in the referenced template:
+- Required parameters appear first (marked with ⚠)
+- Each suggestion shows the parameter type and default value
+- Already-set parameters are shown at the bottom
+
+### 📦 Pipeline Variable Hover
+Hover over any `$(variableName)` or `${{ variables.name }}` reference to see:
+- The variable's value (from the pipeline `variables:` block)
+- The line where it is defined
+- For variable groups: the group name
+- For Azure DevOps system variables (`Build.*`, `System.*`, `Agent.*`, etc.): a link to the official docs
+
+### 🌲 Template Dependency Tree View
+A sidebar panel (Activity Bar) showing the full template dependency tree for the currently active pipeline file:
+- Expand any node to see templates it references (nested templates supported)
+- Click any node to open the template file
+- Cross-repo templates show a 🔗 repo badge
+- Missing or unresolvable templates show a ⚠ warning icon
+- Refresh button in the panel title bar
+
+### 🔗 Cross-Repository Template Support
+Resolves `@alias` references using `resources.repositories` declarations. The extension maps each alias to its repository name and resolves the template path as `{repo-root}/../{repo-name}/{template-path}` on the local filesystem.
+
+### ⌨️ Go-to-Definition
+Press **F12** / **Cmd+Click** / **Ctrl+Click** on any `- template:` line to jump directly to the template file.
+
+### 🎨 Configurable Required Parameter Color
+Required parameters are highlighted in a configurable color (default: red) in the hover tooltip.
+
+### ✅ Zero Dependencies
+No `npm install` needed at runtime. Works straight from the marketplace.
 
 ---
 
 ## How it works
+
+### Template Parameter Hover
 
 In your template YAML files, mark required parameters with a `# REQUIRED` comment on the line immediately before the `- name:` entry:
 
@@ -48,11 +87,99 @@ The tooltip will show each parameter, its type, default value, and whether it is
 
 ---
 
-## Cross-repository templates
+### Parameter Validation Diagnostics
 
-Azure Pipelines lets you reference templates from other repositories using the `@alias` syntax.
-The extension resolves these references automatically by reading the `resources.repositories`
-block in the same file.
+The extension automatically validates every template call site in your pipeline files. No configuration needed — it works as soon as you open a YAML file.
+
+**Missing required parameter** (red squiggly on the `template:` line):
+```yaml
+- template: templates/deploy.yml   # ← Error: Missing required parameter 'environment'
+  parameters:
+    azureSubscription: my-sub
+```
+
+**Unknown parameter** (yellow squiggly on the parameter name):
+```yaml
+- template: templates/deploy.yml
+  parameters:
+    environment: Production
+    typoParam: value              # ← Warning: Unknown parameter 'typoParam'
+```
+
+**Type mismatch** (yellow squiggly on the parameter line):
+```yaml
+- template: templates/build.yml
+  parameters:
+    publishArtifact: 'yes'        # ← Warning: expects 'boolean', got 'string'
+```
+
+> **Note:** Parameters passed as pipeline expressions (`$(var)` or `${{ variables.x }}`) are excluded from type checking since their values are only known at runtime.
+
+---
+
+### IntelliSense Autocomplete
+
+When your cursor is inside the `parameters:` block under a `- template:` line, press **Ctrl+Space** (or just start typing) to see autocomplete suggestions:
+
+```yaml
+- template: templates/deploy.yml
+  parameters:
+    env<cursor>   # ← suggests: environment ⚠ required, ...
+```
+
+Each suggestion includes:
+- The parameter name
+- Its type (shown right-aligned)
+- Whether it is required
+- Its default value (if any)
+- A snippet that places the cursor after the `: ` for immediate value entry
+
+---
+
+### Pipeline Variable Hover
+
+Hover over any `$(variableName)` or `${{ variables.name }}` reference in your pipeline:
+
+```yaml
+variables:
+  buildConfiguration: 'Release'   # defined on line 3
+
+steps:
+  - script: dotnet build --configuration $(buildConfiguration)
+  #                                       ^^^^^^^^^^^^^^^^^^^
+  #                                       Hover here → shows value 'Release', line 3
+```
+
+**Variable groups** are shown with their group name:
+```yaml
+variables:
+  - group: my-secrets-group   # hover over $(secretVar) → shows group name
+```
+
+**System variables** (`Build.BuildId`, `System.TeamProject`, etc.) show a link to the Azure DevOps predefined variables documentation.
+
+---
+
+### Template Dependency Tree View
+
+Open the **Azure Templates Navigator** panel in the Activity Bar (left sidebar). The tree automatically updates when you switch between YAML files.
+
+```
+📄 azure-pipelines.yml
+  ├── 📄 build-dotnet.yml          3 params, 2 required
+  ├── 📄 run-tests.yml             2 params, 1 required
+  ├── 🔗 deploy-stage.yml @shared  6 params, 3 required
+  └── 📄 notify-teams.yml          3 params
+        └── 📄 teams-webhook.yml   1 param
+```
+
+Click any node to open the template file. Use the **↺ Refresh** button in the panel title bar to force a refresh.
+
+---
+
+## Cross-Repository Templates
+
+Azure Pipelines lets you reference templates from other repositories using the `@alias` syntax. The extension resolves these references automatically by reading the `resources.repositories` block in the same file.
 
 ### How it works
 
@@ -69,10 +196,8 @@ stages:
 ```
 
 The extension:
-1. Reads the `resources.repositories` block and builds an alias → repo-name map
-   (`templates` → `shared-templates`)
-2. Resolves the template path as **`{repo-root}/../shared-templates/stages/build.yml`**
-   (one level above the current repo root, next to it on disk)
+1. Reads the `resources.repositories` block and builds an alias → repo-name map (`templates` → `shared-templates`)
+2. Resolves the template path as **`{repo-root}/../shared-templates/stages/build.yml`** (one level above the current repo root, next to it on disk)
 
 ### Setup
 
@@ -86,14 +211,11 @@ parent-directory/
     └── stages/build.yml
 ```
 
-The hover tooltip will show the template's parameters and a **🔗 External repository** badge.
-If the sibling directory doesn't exist yet, the tooltip shows a helpful message telling you
-which repo to clone.
+The hover tooltip will show the template's parameters and a **🔗 External repository** badge. If the sibling directory doesn't exist yet, the tooltip shows a helpful message telling you which repo to clone.
 
 ### Unknown alias
 
-If you hover over a `@alias` reference that has no matching entry in `resources.repositories`,
-the tooltip explains what to add:
+If you hover over a `@alias` reference that has no matching entry in `resources.repositories`, the tooltip explains what to add:
 
 > ⚠️ Repository alias not found: `@templates`
 > Add a `resources.repositories` entry with `repository: templates` to enable cross-repo template resolution.
@@ -105,6 +227,8 @@ the tooltip explains what to add:
 | Setting | Default | Description |
 |---|---|---|
 | `azure-templates-navigator.requiredParameterColor` | `#c92d35` | Hex color for required parameter names in the hover tooltip |
+| `azure-templates-navigator.diagnostics.enabled` | `true` | Enable/disable parameter validation diagnostics |
+| `azure-templates-navigator.diagnostics.debounceMs` | `500` | Milliseconds to wait after a document change before re-running diagnostics |
 
 You can also run the command **"Azure Templates Navigator: Set Required Parameter Color"** from the Command Palette (`Cmd+Shift+P`) to change the color interactively. Accepts hex values (`#ff0000`), named colors (`red`, `blue`, `green`, `pink`, `purple`, `orange`, `yellow`, `tesla`), or `random`.
 
@@ -136,8 +260,12 @@ npm install
 2. Press **F5** (or go to **Run → Start Debugging**)
 3. A new VS Code window opens — the **Extension Development Host** — with your extension loaded
 4. In that new window, the `samples/` folder is opened automatically
-5. Open `samples/azure-pipelines.yml` and hover over any `- template:` line
-6. You should see the parameter tooltip immediately
+5. Open `samples/azure-pipelines.yml` and:
+   - Hover over any `- template:` line to see the parameter tooltip
+   - Hover over any `$(variableName)` to see the variable value
+   - Look at the Problems panel for parameter validation diagnostics
+   - Open the Azure Templates Navigator panel in the Activity Bar
+6. You should see all features working immediately
 
 **To reload after making changes:**
 - Press `Cmd+R` (Mac) / `Ctrl+R` (Windows/Linux) in the Extension Development Host window, **or**
@@ -192,8 +320,10 @@ npm test
 ## Known Limitations
 
 - Only parses `parameters:` blocks at the top level of the template file
-- Template references using variables (e.g. `- template: ${{ variables.templatePath }}`) are not resolved
+- Template references using variables (e.g. `- template: ${{ variables.templatePath }}`) are not resolved (skipped gracefully)
 - Cross-repo resolution assumes the sibling repo is cloned locally; remote-only repos are not fetched automatically
+- Variable group contents require an Azure DevOps connection to resolve (only the group name is shown)
+- Type checking for `object`, `step`, `job`, `stage` parameter types is limited (multi-line YAML values are not fully parsed)
 
 ---
 

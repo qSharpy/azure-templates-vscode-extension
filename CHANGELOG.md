@@ -7,6 +7,59 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.3.0] - 2026-02-18
+
+### Added
+
+- **Parameter Validation Diagnostics** — real-time squiggly-line diagnostics on every
+  `- template:` call site in your pipeline YAML files:
+  - 🔴 **Error** when a required parameter is missing from the call site
+  - 🟡 **Warning** when an unknown parameter (not declared in the template) is passed
+  - 🟡 **Warning** for basic type mismatches (e.g. passing `'yes'` to a `boolean` parameter)
+  - Diagnostics are debounced (500ms) and update automatically as you type
+  - Pipeline expressions (`$(var)`, `${{ variables.x }}`) are excluded from type checking
+  - New settings: `azure-templates-navigator.diagnostics.enabled` and
+    `azure-templates-navigator.diagnostics.debounceMs`
+
+- **IntelliSense Autocomplete for Template Parameters** — when the cursor is inside the
+  `parameters:` block under a `- template:` line, the extension offers `CompletionItem`
+  suggestions for every parameter declared in the referenced template:
+  - Required parameters appear first, marked with ⚠
+  - Each suggestion shows the parameter type and default value as documentation
+  - Inserts a snippet placing the cursor after `: ` for immediate value entry
+  - Already-set parameters are shown at the bottom of the list
+
+- **Pipeline Variable Hover** — hover over any `$(variableName)` or
+  `${{ variables.name }}` reference to see:
+  - The variable's value and the line where it is defined (from the `variables:` block)
+  - Variable group names (when the variable is defined via `- group:`)
+  - Azure DevOps system variables (`Build.*`, `System.*`, `Agent.*`, etc.) are identified
+    and linked to the official predefined variables documentation
+
+- **Template Dependency Tree View** — a new sidebar panel in the Activity Bar:
+  - Shows the full template dependency tree for the currently active pipeline YAML file
+  - Expand any node to see templates it references (nested templates supported)
+  - Click any node to open the template file
+  - Cross-repo templates show a 🔗 repo badge; missing templates show a ⚠ warning
+  - Tree refreshes automatically when the active editor changes
+  - Manual refresh button in the panel title bar
+  - New command: `Azure Templates Navigator: Refresh Template Tree`
+
+- **New exported functions** in `hoverProvider.js` for reuse across providers:
+  - `parseVariables(text)` — parses the `variables:` block (map form and list form)
+  - `parsePassedParameters(lines, templateLine)` — parses parameters passed at a call site
+  - `findRepoRoot(startDir)` — now exported for use by other providers
+
+- **New unit tests** covering all new functionality:
+  - `test/unit/diagnosticProvider.unit.test.js` — 15 tests for `inferValueType`,
+    `validateCallSite`, and `getDiagnosticsForDocument`
+  - `test/unit/completionProvider.unit.test.js` — 10 tests for `findEnclosingTemplate`,
+    `isCursorInParametersBlock`, and `provideCompletionItems`
+  - Extended `test/unit/hoverProvider.unit.test.js` with 14 new tests for
+    `parseVariables` and `parsePassedParameters`
+
+- Updated `samples/azure-pipelines.yml` with inline comments demonstrating variable hover
+
 ## [1.2.0] - 2026-02-18
 
 ### Added

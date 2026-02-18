@@ -7,27 +7,36 @@ trigger:
 pool:
   vmImage: 'ubuntu-latest'
 
+# ============================================================
+# VARIABLES — hover over any $(varName) reference in this file
+# to see the variable's value and source line.
+# ============================================================
 variables:
   buildConfiguration: 'Release'
   dotnetVersion: '8.0.x'
+  artifactName: 'drop'
+  # Try hovering over $(buildConfiguration) or $(dotnetVersion) anywhere below!
 
 stages:
-  # ============================================
+  # ============================================================
   # BUILD STAGE
-  # ============================================
+  # ============================================================
   - stage: Build
     displayName: 'Build & Test'
     jobs:
       - job: BuildJob
         displayName: 'Build .NET Application'
         steps:
-          # Relative path - references templates/ folder next to this file
+          # Hover over the template line to see its parameters.
+          # The extension will also warn you if you pass an unknown parameter
+          # or forget a required one.
           - template: templates/build-dotnet.yml
             parameters:
               project: '**/*.csproj'
-              buildConfiguration: $(buildConfiguration)
-              dotnetVersion: $(dotnetVersion)
+              buildConfiguration: $(buildConfiguration)   # ← hover over $(buildConfiguration)
+              dotnetVersion: $(dotnetVersion)             # ← hover over $(dotnetVersion)
               publishArtifact: true
+              artifactName: $(artifactName)               # ← hover over $(artifactName)
 
           # Relative path - run tests template
           - template: templates/run-tests.yml
@@ -48,10 +57,10 @@ stages:
               dockerfile: 'src/Api/Dockerfile'
               pushImage: true
 
-  # ============================================
+  # ============================================================
   # DEPLOY TO DEV
-  # ============================================
   # Absolute path from workspace root - references stages/ folder
+  # ============================================================
   - template: /samples/stages/deploy-stage.yml
     parameters:
       environment: 'Development'
@@ -60,9 +69,9 @@ stages:
       dependsOn:
         - Build
 
-  # ============================================
+  # ============================================================
   # DEPLOY TO STAGING
-  # ============================================
+  # ============================================================
   - template: /samples/stages/deploy-stage.yml
     parameters:
       environment: 'Staging'
@@ -72,9 +81,9 @@ stages:
         - Deploy_Development
       condition: succeeded()
 
-  # ============================================
+  # ============================================================
   # DEPLOY TO PRODUCTION
-  # ============================================
+  # ============================================================
   - stage: DeployProduction
     displayName: 'Deploy to Production'
     dependsOn:
@@ -98,3 +107,11 @@ stages:
                     appName: 'myapp-prod-webapp'
                     slot: 'staging'
                     appType: 'webAppLinux'
+
+                # Notify on completion
+                - template: templates/notify-teams.yml
+                  parameters:
+                    webhookUrl: 'https://teams.webhook.url'
+                    #message: 'Deployment to Production complete!'
+                    environment: 'Production'
+                    includeRunLink: asd

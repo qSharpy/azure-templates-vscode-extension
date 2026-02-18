@@ -2,6 +2,9 @@
 
 const vscode = require('vscode');
 const { hoverProvider, definitionProvider } = require('./hoverProvider');
+const { createDiagnosticProvider } = require('./diagnosticProvider');
+const { completionProvider } = require('./completionProvider');
+const { createTreeViewProvider } = require('./treeViewProvider');
 
 /**
  * Called once when the extension is first activated.
@@ -10,19 +13,37 @@ const { hoverProvider, definitionProvider } = require('./hoverProvider');
 function activate(context) {
   console.log('[Azure Templates Navigator] Extension activated');
 
-  // Register the hover provider for all YAML files
+  // ── Hover provider ────────────────────────────────────────────────────────
+  // Handles both template: hover (parameters tooltip) and variable hover
   const hoverDisposable = vscode.languages.registerHoverProvider(
     { language: 'yaml', scheme: '*' },
     hoverProvider
   );
 
-  // Register the definition provider — enables F12 / Cmd+Click / Ctrl+Click navigation
+  // ── Definition provider ───────────────────────────────────────────────────
+  // Enables F12 / Cmd+Click / Ctrl+Click navigation to template files
   const definitionDisposable = vscode.languages.registerDefinitionProvider(
     { language: 'yaml', scheme: '*' },
     definitionProvider
   );
 
-  // Command: open a template file, optionally to the side.
+  // ── Completion provider ───────────────────────────────────────────────────
+  // IntelliSense autocomplete for template parameters
+  const completionDisposable = vscode.languages.registerCompletionItemProvider(
+    { language: 'yaml', scheme: '*' },
+    completionProvider,
+    ' ', '\n', ':'  // trigger characters
+  );
+
+  // ── Diagnostic provider ───────────────────────────────────────────────────
+  // Validates template call sites: missing required params, unknown params, type mismatches
+  createDiagnosticProvider(context);
+
+  // ── Tree view provider ────────────────────────────────────────────────────
+  // Sidebar panel showing the template dependency tree for the active pipeline file
+  createTreeViewProvider(context);
+
+  // ── Command: open a template file, optionally to the side ─────────────────
   // Args: { filePath: string, beside?: boolean }
   //
   // When opening "to the side" we want each new template to appear in its OWN
@@ -60,7 +81,7 @@ function activate(context) {
     }
   );
 
-  // Command: let the user pick a color for required parameters
+  // ── Command: set required parameter color ─────────────────────────────────
   const colorCommandDisposable = vscode.commands.registerCommand(
     'azure-templates-navigator.setRequiredParameterColor',
     async () => {
@@ -109,7 +130,13 @@ function activate(context) {
     }
   );
 
-  context.subscriptions.push(hoverDisposable, definitionDisposable, openTemplateDisposable, colorCommandDisposable);
+  context.subscriptions.push(
+    hoverDisposable,
+    definitionDisposable,
+    completionDisposable,
+    openTemplateDisposable,
+    colorCommandDisposable,
+  );
 }
 
 function deactivate() {
