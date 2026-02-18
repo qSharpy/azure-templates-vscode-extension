@@ -18,5 +18,8 @@
 		"no-unused-vars": "warn",
 		"constructor-super": "warn",
 		"valid-typeof": "warn"
-	}
+	},
+	"ignorePatterns": [
+		"media/d3.min.js"
+	]
 }

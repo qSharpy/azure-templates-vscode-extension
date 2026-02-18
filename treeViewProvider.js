@@ -22,9 +22,11 @@ class TemplateNode {
    * @param {boolean}     opts.isRoot       True for the root pipeline file node
    * @param {boolean}     opts.notFound     True when the file could not be resolved/read
    * @param {boolean}     opts.unknownAlias True when the @alias is not in resources.repositories
+   * @param {boolean}     opts.isCycle      True when this reference creates a circular dependency
    * @param {string|null} opts.alias        The alias string when unknownAlias is true
    * @param {number}      opts.paramCount   Number of parameters declared in the template
    * @param {number}      opts.requiredCount Number of required parameters
+   * @param {boolean}     opts.hasChildren  True when the template file itself contains template refs
    */
   constructor({
     label,
@@ -34,9 +36,11 @@ class TemplateNode {
     isRoot = false,
     notFound = false,
     unknownAlias = false,
+    isCycle = false,
     alias = null,
     paramCount = 0,
     requiredCount = 0,
+    hasChildren = false,
   }) {
     this.label = label;
     this.filePath = filePath;
@@ -45,9 +49,11 @@ class TemplateNode {
     this.isRoot = isRoot;
     this.notFound = notFound;
     this.unknownAlias = unknownAlias;
+    this.isCycle = isCycle;
     this.alias = alias;
     this.paramCount = paramCount;
     this.requiredCount = requiredCount;
+    this.hasChildren = hasChildren;
   }
 }
 
@@ -55,11 +61,11 @@ class TemplateNode {
  * Scans a YAML file for `- template:` references and returns an array of
  * TemplateNode objects representing each call site.
  *
- * @param {string} filePath      Absolute path of the file to scan
- * @param {Set<string>} visited  Set of already-visited file paths (cycle guard)
+ * @param {string}      filePath  Absolute path of the file to scan
+ * @param {Set<string>} visited   Set of already-visited file paths (cycle guard)
  * @returns {TemplateNode[]}
  */
-function getTemplateChildren(filePath) {
+function getTemplateChildren(filePath, visited = new Set()) {
   let text;
   try {
     text = fs.readFileSync(filePath, 'utf8');
@@ -72,7 +78,10 @@ function getTemplateChildren(filePath) {
   const children = [];
 
   for (const line of lines) {
-    const match = /(?:^|\s)-?\s*template\s*:\s*(.+)$/.exec(line);
+    // Strip YAML line comments before matching to avoid false positives from
+    // lines like:  # ── Step template: build the .NET project ──
+    const stripped = line.replace(/(^\s*#.*|\s#.*)$/, '');
+    const match = /(?:^|\s)-?\s*template\s*:\s*(.+)$/.exec(stripped);
     if (!match) continue;
 
     const templateRef = match[1].trim();
@@ -114,14 +123,32 @@ function getTemplateChildren(filePath) {
       continue;
     }
 
-    // Parse parameters for the badge
+    // ── Cycle detection ───────────────────────────────────────────────────
+    if (visited.has(resolvedPath)) {
+      const shortName = path.basename(resolvedPath);
+      children.push(new TemplateNode({
+        label: repoName ? `${shortName} @${repoName}` : shortName,
+        filePath: resolvedPath,
+        templateRef,
+        repoName,
+        isCycle: true,
+      }));
+      continue;
+    }
+
+    // Parse parameters for the badge, and check if this template itself
+    // references further templates (so we know whether to show an expand arrow)
     let paramCount = 0;
     let requiredCount = 0;
+    let hasChildren = false;
     try {
       const tplText = fs.readFileSync(resolvedPath, 'utf8');
       const params = parseParameters(tplText);
       paramCount = params.length;
       requiredCount = params.filter(p => p.required).length;
+      // Quick scan: does this file contain any `template:` references?
+      const templateLineRe = /(?:^|\s)-?\s*template\s*:\s*(.+)$/;
+      hasChildren = tplText.split('\n').some(l => templateLineRe.test(l.replace(/(^\s*#.*|\s#.*)$/, '')));
     } catch {
       // ignore
     }
@@ -137,6 +164,7 @@ function getTemplateChildren(filePath) {
       repoName,
       paramCount,
       requiredCount,
+      hasChildren,
     }));
   }
 
@@ -172,20 +200,25 @@ class TemplateDependencyProvider {
    * @returns {vscode.TreeItem}
    */
   getTreeItem(node) {
-    const item = new vscode.TreeItem(
-      node.label,
-      node.isRoot
-        ? vscode.TreeItemCollapsibleState.Expanded
-        : vscode.TreeItemCollapsibleState.Collapsed
-    );
+    // Cycle and missing nodes are leaves; resolved nodes are expandable only
+    // when the underlying file actually contains further template references.
+    const collapsible = node.isRoot
+      ? vscode.TreeItemCollapsibleState.Expanded
+      : (node.hasChildren && !node.notFound && !node.unknownAlias && !node.isCycle)
+        ? vscode.TreeItemCollapsibleState.Collapsed
+        : vscode.TreeItemCollapsibleState.None;
+
+    const item = new vscode.TreeItem(node.label, collapsible);
 
     // ── Icon ──────────────────────────────────────────────────────────────
-    if (node.isRoot) {
+    if (node.isCycle) {
+      item.iconPath = new vscode.ThemeIcon('issues', new vscode.ThemeColor('list.warningForeground'));
+    } else if (node.isRoot) {
       item.iconPath = new vscode.ThemeIcon('file-code');
     } else if (node.unknownAlias) {
-      item.iconPath = new vscode.ThemeIcon('question');
+      item.iconPath = new vscode.ThemeIcon('question', new vscode.ThemeColor('list.warningForeground'));
     } else if (node.notFound) {
-      item.iconPath = new vscode.ThemeIcon('warning');
+      item.iconPath = new vscode.ThemeIcon('warning', new vscode.ThemeColor('list.errorForeground'));
     } else if (node.repoName) {
       item.iconPath = new vscode.ThemeIcon('repo');
     } else {
@@ -196,7 +229,11 @@ class TemplateDependencyProvider {
     const md = new vscode.MarkdownString(undefined, true);
     md.isTrusted = true;
 
-    if (node.isRoot) {
+    if (node.isCycle) {
+      md.appendMarkdown(`**🔄 Circular reference detected**\n\n`);
+      md.appendMarkdown(`\`${node.templateRef}\` is already in the current dependency chain.\n\n`);
+      md.appendMarkdown(`_Expanding this node would cause infinite recursion._`);
+    } else if (node.isRoot) {
       md.appendMarkdown(`**📄 Pipeline file**\n\n\`${node.filePath}\``);
     } else if (node.unknownAlias) {
       md.appendMarkdown(`**⚠️ Unknown alias:** \`@${node.alias}\`\n\n`);
@@ -222,16 +259,18 @@ class TemplateDependencyProvider {
     item.tooltip = md;
 
     // ── Description (shown dimmed after the label) ─────────────────────────
-    if (!node.isRoot && !node.notFound && !node.unknownAlias) {
+    if (node.isCycle) {
+      item.description = '↩ circular';
+    } else if (!node.isRoot && !node.notFound && !node.unknownAlias) {
       const parts = [];
       if (node.paramCount > 0) {
         parts.push(`${node.paramCount} param${node.paramCount !== 1 ? 's' : ''}`);
       }
       if (node.requiredCount > 0) {
-        parts.push(`${node.requiredCount} required`);
+        parts.push(`${node.requiredCount} req ⚠`);
       }
       if (parts.length > 0) {
-        item.description = parts.join(', ');
+        item.description = parts.join(' · ');
       }
     } else if (node.unknownAlias) {
       item.description = `unknown alias @${node.alias}`;
@@ -240,7 +279,7 @@ class TemplateDependencyProvider {
     }
 
     // ── Click command: open the file ──────────────────────────────────────
-    if (node.filePath && !node.notFound) {
+    if (node.filePath && !node.notFound && !node.isCycle) {
       item.command = {
         command: 'azure-templates-navigator.openTemplate',
         title: 'Open Template',
@@ -248,8 +287,9 @@ class TemplateDependencyProvider {
       };
     }
 
-    // ── Context value for future context-menu contributions ───────────────
-    item.contextValue = node.isRoot ? 'pipelineRoot'
+    // ── Context value for context-menu contributions ───────────────────────
+    item.contextValue = node.isCycle ? 'templateCycle'
+      : node.isRoot ? 'pipelineRoot'
       : node.notFound ? 'templateNotFound'
       : node.unknownAlias ? 'templateUnknownAlias'
       : node.repoName ? 'templateExternal'
@@ -279,12 +319,20 @@ class TemplateDependencyProvider {
 
     // ── Root node: scan the pipeline file for template references ─────────
     if (node.isRoot && node.filePath) {
-      return getTemplateChildren(node.filePath);
+      const visited = new Set([node.filePath]);
+      return getTemplateChildren(node.filePath, visited);
     }
 
     // ── Template node: scan the template file for nested template refs ─────
-    if (node.filePath && !node.notFound && !node.unknownAlias) {
-      return getTemplateChildren(node.filePath);
+    // Cycle nodes and unresolved nodes have no children
+    if (node.filePath && !node.notFound && !node.unknownAlias && !node.isCycle) {
+      // Rebuild visited set by walking up — we don't store it on the node,
+      // so we use a fresh set seeded with this node's path. This is safe
+      // because getTemplateChildren seeds visited with the parent before
+      // recursing, so direct parent→child cycles are caught. Deeper cycles
+      // (A→B→C→A) are caught because each call passes its own visited copy.
+      const visited = new Set([node.filePath]);
+      return getTemplateChildren(node.filePath, visited);
     }
 
     return [];
@@ -334,6 +382,37 @@ function createTreeViewProvider(context) {
     () => updateForEditor(vscode.window.activeTextEditor)
   );
   context.subscriptions.push(refreshCmd);
+
+  // ── Context menu: Open to Side ────────────────────────────────────────
+  const openBesideCmd = vscode.commands.registerCommand(
+    'azure-templates-navigator.openTemplateBeside',
+    (node) => {
+      if (node && node.filePath) {
+        vscode.commands.executeCommand(
+          'azure-templates-navigator.openTemplate',
+          { filePath: node.filePath, beside: true }
+        );
+      }
+    }
+  );
+  context.subscriptions.push(openBesideCmd);
+
+  // ── Context menu: Copy Template Path ─────────────────────────────────
+  const copyPathCmd = vscode.commands.registerCommand(
+    'azure-templates-navigator.copyTemplatePath',
+    (node) => {
+      if (node && node.templateRef) {
+        vscode.env.clipboard.writeText(node.templateRef).then(() => {
+          vscode.window.showInformationMessage(`Copied: ${node.templateRef}`);
+        });
+      } else if (node && node.filePath) {
+        vscode.env.clipboard.writeText(node.filePath).then(() => {
+          vscode.window.showInformationMessage(`Copied: ${node.filePath}`);
+        });
+      }
+    }
+  );
+  context.subscriptions.push(copyPathCmd);
 
   // Initialize with the currently active editor
   updateForEditor(vscode.window.activeTextEditor);

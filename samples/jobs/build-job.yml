@@ -1,0 +1,86 @@
+# ============================================================
+# LEVEL 3 TEMPLATE — Job template
+# Called by: samples/stages/ci-stage.yml
+# Calls:     samples/templates/build-dotnet.yml
+#            samples/templates/run-tests.yml
+#            samples/templates/docker-build-push.yml
+#            samples/templates/notify-teams.yml
+#
+# This is the deepest level in the 3-level template chain:
+#   deep-pipeline.yml → ci-stage.yml → build-job.yml → step templates
+# ============================================================
+parameters:
+  # REQUIRED
+  - name: jobName
+    type: string
+  - name: project
+    type: string
+  - name: testProject
+    type: string
+  # OPTIONAL
+  - name: buildConfiguration
+    type: string
+    default: 'Release'
+  - name: dotnetVersion
+    type: string
+    default: '8.0.x'
+  - name: dockerRepository
+    type: string
+    default: ''
+  - name: dockerRegistryServiceConnection
+    type: string
+    default: ''
+  - name: dockerfile
+    type: string
+    default: 'Dockerfile'
+  - name: pushImage
+    type: boolean
+    default: false
+  - name: collectCoverage
+    type: boolean
+    default: true
+  - name: notifyWebhookUrl
+    type: string
+    default: ''
+  - name: notifyMessage
+    type: string
+    default: 'Build completed'
+  - name: dependsOn
+    type: object
+    default: []
+
+jobs:
+  - job: ${{ parameters.jobName }}
+    displayName: 'Build & Test — ${{ parameters.jobName }}'
+    dependsOn: ${{ parameters.dependsOn }}
+    steps:
+      # ── Step template: build the .NET project ──────────────────
+      - template: /samples/templates/build-dotnet.yml
+        parameters:
+          project: ${{ parameters.project }}
+          buildConfiguration: ${{ parameters.buildConfiguration }}
+          dotnetVersion: ${{ parameters.dotnetVersion }}
+
+      # ── Step template: run unit tests ──────────────────────────
+      - template: /samples/templates/run-tests.yml
+        parameters:
+          testProject: ${{ parameters.testProject }}
+          buildConfiguration: ${{ parameters.buildConfiguration }}
+          collectCoverage: ${{ parameters.collectCoverage }}
+
+      # ── Step template: docker build & push (conditional) ───────
+      - ${{ if ne(parameters.dockerRepository, '') }}:
+        - template: /samples/templates/docker-build-push.yml
+          parameters:
+            repository: ${{ parameters.dockerRepository }}
+            dockerRegistryServiceConnection: ${{ parameters.dockerRegistryServiceConnection }}
+            dockerfile: ${{ parameters.dockerfile }}
+            pushImage: ${{ parameters.pushImage }}
+
+      # ── Step template: Teams notification (conditional) ────────
+      - ${{ if ne(parameters.notifyWebhookUrl, '') }}:
+        - template: /samples/templates/notify-teams.yml
+          parameters:
+            webhookUrl: ${{ parameters.notifyWebhookUrl }}
+            message: ${{ parameters.notifyMessage }}
+            title: '${{ parameters.jobName }} — Build Status'

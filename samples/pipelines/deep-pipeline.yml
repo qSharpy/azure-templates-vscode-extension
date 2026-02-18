@@ -1,0 +1,127 @@
+# ============================================================
+# 3-LEVEL DEEP TEMPLATE CHAIN — Entry point (Level 1)
+#
+# Template nesting hierarchy:
+#
+#   deep-pipeline.yml          ← YOU ARE HERE (pipeline root)
+#     └── ci-stage.yml         ← Level 2: stage template
+#           └── build-job.yml  ← Level 3: job template
+#                 ├── build-dotnet.yml    (step template)
+#                 ├── run-tests.yml       (step template)
+#                 ├── docker-build-push.yml (step template, conditional)
+#                 └── notify-teams.yml   (step template, conditional)
+#     └── deploy-stage.yml     ← Level 2: stage template (reused from other pipelines)
+#
+# Useful for testing the extension's graph view, tree view,
+# hover provider, and diagnostic provider across deep chains.
+# ============================================================
+
+trigger:
+  branches:
+    include:
+      - main
+      - release/*
+      - feature/*
+
+pr:
+  branches:
+    include:
+      - main
+
+pool:
+  vmImage: 'ubuntu-latest'
+
+variables:
+  # ── Build variables ────────────────────────────────────────
+  buildConfiguration: 'Release'
+  dotnetVersion: '8.0.x'
+  serviceName: 'payment-service'
+  dockerRegistry: 'myacr.azurecr.io'
+
+  # ── Notification variables ─────────────────────────────────
+  teamsWebhookUrl: 'https://outlook.office.com/webhook/deep-pipeline-hook'
+
+stages:
+  # ============================================================
+  # CI STAGE — Level 1 calls Level 2 (ci-stage.yml)
+  #            ci-stage.yml calls Level 3 (build-job.yml)
+  #            build-job.yml calls step templates
+  # ============================================================
+  - template: /samples/stages/ci-stage.yml
+    parameters:
+      stageName: 'CI_Build'
+      displayName: 'CI — Build & Unit Tests'
+      project: 'src/$(serviceName)/**/*.csproj'
+      testProject: 'tests/$(serviceName).UnitTests/**/*.csproj'
+      buildConfiguration: $(buildConfiguration)
+      dotnetVersion: $(dotnetVersion)
+      dockerRepository: '$(dockerRegistry)/$(serviceName)'
+      dockerRegistryServiceConnection: 'ACR-ServiceConnection'
+      dockerfile: 'src/$(serviceName)/Dockerfile'
+      pushImage: false
+      collectCoverage: true
+      notifyWebhookUrl: $(teamsWebhookUrl)
+      notifyMessage: 'CI build completed for $(serviceName)'
+
+  # ============================================================
+  # CI STAGE WITH INTEGRATION TESTS
+  # Same level-2 template, different parameters — shows reuse
+  # ============================================================
+  - template: /samples/stages/ci-stage.yml
+    parameters:
+      stageName: 'CI_Integration'
+      displayName: 'CI — Integration Tests & Docker Push'
+      project: 'src/$(serviceName)/**/*.csproj'
+      testProject: 'tests/$(serviceName).UnitTests/**/*.csproj'
+      buildConfiguration: $(buildConfiguration)
+      dotnetVersion: $(dotnetVersion)
+      dockerRepository: '$(dockerRegistry)/$(serviceName)'
+      dockerRegistryServiceConnection: 'ACR-ServiceConnection'
+      dockerfile: 'src/$(serviceName)/Dockerfile'
+      pushImage: true
+      collectCoverage: true
+      runIntegrationTests: true
+      integrationTestProject: 'tests/$(serviceName).IntegrationTests/**/*.csproj'
+      notifyWebhookUrl: $(teamsWebhookUrl)
+      notifyMessage: 'Integration tests completed for $(serviceName)'
+      dependsOn:
+        - CI_Build
+      condition: and(succeeded(), ne(variables['Build.Reason'], 'PullRequest'))
+
+  # ============================================================
+  # DEPLOY TO DEV — reuses the existing deploy-stage.yml
+  # (deploy-stage.yml is a separate level-2 template that
+  #  contains inline steps, not another template call)
+  # ============================================================
+  - template: /samples/stages/deploy-stage.yml
+    parameters:
+      environment: 'Development'
+      azureSubscription: 'Azure-Dev-ServiceConnection'
+      appName: '$(serviceName)-dev'
+      dependsOn:
+        - CI_Integration
+      condition: and(succeeded(), ne(variables['Build.Reason'], 'PullRequest'))
+
+  # ============================================================
+  # DEPLOY TO STAGING
+  # ============================================================
+  - template: /samples/stages/deploy-stage.yml
+    parameters:
+      environment: 'Staging'
+      azureSubscription: 'Azure-Staging-ServiceConnection'
+      appName: '$(serviceName)-staging'
+      dependsOn:
+        - Deploy_Development
+      condition: and(succeeded(), eq(variables['Build.SourceBranch'], 'refs/heads/main'))
+
+  # ============================================================
+  # DEPLOY TO PRODUCTION
+  # ============================================================
+  - template: /samples/stages/deploy-stage.yml
+    parameters:
+      environment: 'Production'
+      azureSubscription: 'Azure-Prod-ServiceConnection'
+      appName: '$(serviceName)-prod'
+      dependsOn:
+        - Deploy_Staging
+      condition: and(succeeded(), eq(variables['Build.SourceBranch'], 'refs/heads/main'))

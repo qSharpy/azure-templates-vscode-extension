@@ -39,7 +39,10 @@ function findEnclosingTemplate(lines, cursorLine) {
 
     // Check if this is a template: line at a shallower indent than the cursor
     if (lineIndent < cursorIndent) {
-      const match = /(?:^|\s)-?\s*template\s*:\s*(.+)$/.exec(trimmed);
+      // Strip YAML line comments first to avoid matching "# ── Step template: ..."
+      const match = /(?:^|\s)-?\s*template\s*:\s*(.+)$/.exec(
+        trimmed.replace(/(^\s*#.*|\s#.*)$/, '')
+      );
       if (match) {
         return { templateRef: match[1].trim(), templateLine: i };
       }

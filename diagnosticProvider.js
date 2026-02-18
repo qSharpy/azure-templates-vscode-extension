@@ -181,7 +181,10 @@ function getDiagnosticsForDocument(document) {
 
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i];
-    const match = /(?:^|\s)-?\s*template\s*:\s*(.+)$/.exec(line);
+    // Strip YAML line comments before matching to avoid false positives from
+    // lines like:  # ── Step template: build the .NET project ──
+    const stripped = line.replace(/(^\s*#.*|\s#.*)$/, '');
+    const match = /(?:^|\s)-?\s*template\s*:\s*(.+)$/.exec(stripped);
     if (!match) continue;
 
     const templateRef = match[1].trim();

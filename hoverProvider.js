@@ -595,7 +595,10 @@ const hoverProvider = {
     // ── Template hover ────────────────────────────────────────────────────────
     // Match:  "- template: path/to/template.yml"
     // Also handles indented variants and optional leading "- "
-    const match = /(?:^|\s)-?\s*template\s*:\s*(.+)$/.exec(line);
+    // Strip YAML line comments first to avoid matching "# ── Step template: ..."
+    const match = /(?:^|\s)-?\s*template\s*:\s*(.+)$/.exec(
+      line.replace(/(^\s*#.*|\s#.*)$/, '')
+    );
     if (!match) return undefined;
 
     const templateRef = match[1].trim();
@@ -665,7 +668,10 @@ const definitionProvider = {
   provideDefinition(document, position) {
     const line = document.lineAt(position).text;
 
-    const match = /(?:^|\s)-?\s*template\s*:\s*(.+)$/.exec(line);
+    // Strip YAML line comments first to avoid matching "# ── Step template: ..."
+    const match = /(?:^|\s)-?\s*template\s*:\s*(.+)$/.exec(
+      line.replace(/(^\s*#.*|\s#.*)$/, '')
+    );
     if (!match) return undefined;
 
     const templateRef = match[1].trim();

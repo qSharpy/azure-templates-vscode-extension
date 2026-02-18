@@ -1,0 +1,270 @@
+'use strict';
+
+/**
+ * graphDataBuilder.js
+ *
+ * Pure Node.js functions (no vscode dependency) that scan a workspace
+ * directory and build the graph data (nodes + edges) for the Template Graph
+ * WebView panel.
+ *
+ * Kept separate from graphWebViewProvider.js so these functions can be
+ * unit-tested without a VS Code host.
+ */
+
+const fs   = require('fs');
+const path = require('path');
+const {
+  parseRepositoryAliases,
+  parseParameters,
+  resolveTemplatePath,
+} = require('./hoverProvider');
+
+// ---------------------------------------------------------------------------
+// collectYamlFiles
+// ---------------------------------------------------------------------------
+
+/**
+ * Recursively collects all *.yml / *.yaml files under `dir`,
+ * skipping common non-pipeline directories.
+ *
+ * @param {string}   dir
+ * @param {string[]} [acc]
+ * @returns {string[]}  Absolute file paths
+ */
+function collectYamlFiles(dir, acc = []) {
+  const SKIP = new Set(['.git', 'node_modules', '.vscode', 'dist', 'out', 'build']);
+  let entries;
+  try {
+    entries = fs.readdirSync(dir, { withFileTypes: true });
+  } catch {
+    return acc;
+  }
+  for (const entry of entries) {
+    if (SKIP.has(entry.name)) continue;
+    const full = path.join(dir, entry.name);
+    if (entry.isDirectory()) {
+      collectYamlFiles(full, acc);
+    } else if (entry.isFile() && /\.(ya?ml)$/i.test(entry.name)) {
+      acc.push(full);
+    }
+  }
+  return acc;
+}
+
+// ---------------------------------------------------------------------------
+// isPipelineRoot
+// ---------------------------------------------------------------------------
+
+/**
+ * Determines whether a YAML file looks like an Azure Pipeline root file
+ * (has `trigger:`, `pr:`, `schedules:`, or `stages:` at the top level).
+ *
+ * @param {string} text
+ * @returns {boolean}
+ */
+function isPipelineRoot(text) {
+  return /^(?:trigger|pr|schedules|stages|jobs|steps)\s*:/m.test(text);
+}
+
+// ---------------------------------------------------------------------------
+// extractTemplateRefs
+// ---------------------------------------------------------------------------
+
+/**
+ * Parses a single YAML file and returns the raw template references it contains.
+ *
+ * @param {string} filePath
+ * @returns {{ templateRef: string, line: number }[]}
+ */
+function extractTemplateRefs(filePath) {
+  let text;
+  try {
+    text = fs.readFileSync(filePath, 'utf8');
+  } catch {
+    return [];
+  }
+  const refs = [];
+  const lines = text.split('\n');
+  for (let i = 0; i < lines.length; i++) {
+    // Strip YAML line comments before matching to avoid false positives from
+    // lines like:  # ── Step template: build the .NET project ──
+    const stripped = lines[i].replace(/(^\s*#.*|\s#.*)$/, '');
+    const m = /(?:^|\s)-?\s*template\s*:\s*(.+)$/.exec(stripped);
+    if (m) refs.push({ templateRef: m[1].trim(), line: i });
+  }
+  return refs;
+}
+
+// ---------------------------------------------------------------------------
+// buildWorkspaceGraph
+// ---------------------------------------------------------------------------
+
+/**
+ * @typedef {'pipeline'|'local'|'external'|'missing'|'unknown'} NodeKind
+ *
+ * @typedef {object} GraphNode
+ * @property {string}   id
+ * @property {string}   label
+ * @property {NodeKind} kind
+ * @property {string}   [filePath]
+ * @property {string}   [repoName]
+ * @property {string}   [alias]
+ * @property {number}   paramCount
+ * @property {number}   requiredCount
+ *
+ * @typedef {object} GraphEdge
+ * @property {string} source
+ * @property {string} target
+ * @property {string} [label]
+ */
+
+/**
+ * Builds the full graph data (nodes + edges) by scanning every YAML file
+ * in the workspace root.
+ *
+ * @param {string} workspaceRoot  Absolute path to the workspace folder
+ * @returns {{ nodes: GraphNode[], edges: GraphEdge[] }}
+ */
+function buildWorkspaceGraph(workspaceRoot) {
+  const yamlFiles = collectYamlFiles(workspaceRoot);
+
+  /** @type {Map<string, GraphNode>} */
+  const nodeMap = new Map();
+
+  /** @type {Set<string>} edge dedup key = "sourceId→targetId" */
+  const edgeKeys = new Set();
+
+  /** @type {GraphEdge[]} */
+  const edges = [];
+
+  // ── Pass 1: register every YAML file as a node ──────────────────────────
+  for (const filePath of yamlFiles) {
+    let text = '';
+    try { text = fs.readFileSync(filePath, 'utf8'); } catch { /* skip */ }
+
+    const kind = isPipelineRoot(text) ? 'pipeline' : 'local';
+    nodeMap.set(filePath, {
+      id: filePath,
+      label: path.basename(filePath),
+      kind,
+      filePath,
+      paramCount: 0,
+      requiredCount: 0,
+    });
+  }
+
+  // ── Pass 2: for each file, resolve its template references ───────────────
+  for (const filePath of yamlFiles) {
+    let text = '';
+    try { text = fs.readFileSync(filePath, 'utf8'); } catch { continue; }
+
+    const repoAliases = parseRepositoryAliases(text);
+    const refs = extractTemplateRefs(filePath);
+
+    for (const { templateRef } of refs) {
+      // Skip variable expressions
+      if (/\$\{/.test(templateRef) || /\$\(/.test(templateRef)) continue;
+
+      const resolved = resolveTemplatePath(templateRef, filePath, repoAliases);
+      if (!resolved) continue;
+
+      let targetId;
+      let edgeLabel;
+
+      if (resolved.unknownAlias) {
+        // Synthetic node for unknown alias
+        targetId = `UNKNOWN_ALIAS:${resolved.alias}:${templateRef}`;
+        if (!nodeMap.has(targetId)) {
+          nodeMap.set(targetId, {
+            id: targetId,
+            label: path.basename(templateRef.split('@')[0]),
+            kind: 'unknown',
+            alias: resolved.alias,
+            paramCount: 0,
+            requiredCount: 0,
+          });
+        }
+        edgeLabel = `@${resolved.alias}`;
+      } else {
+        const { filePath: resolvedPath, repoName, alias } = resolved;
+
+        if (!resolvedPath) continue;
+
+        if (!fs.existsSync(resolvedPath)) {
+          // Missing file node
+          targetId = `MISSING:${resolvedPath}`;
+          if (!nodeMap.has(targetId)) {
+            nodeMap.set(targetId, {
+              id: targetId,
+              label: path.basename(resolvedPath),
+              kind: 'missing',
+              filePath: resolvedPath,
+              repoName,
+              paramCount: 0,
+              requiredCount: 0,
+            });
+          }
+        } else {
+          targetId = resolvedPath;
+
+          // Ensure the target node exists (may be outside workspace)
+          if (!nodeMap.has(targetId)) {
+            nodeMap.set(targetId, {
+              id: targetId,
+              label: path.basename(resolvedPath),
+              kind: repoName ? 'external' : 'local',
+              filePath: resolvedPath,
+              repoName,
+              paramCount: 0,
+              requiredCount: 0,
+            });
+          }
+
+          // Upgrade kind to 'external' if referenced via a repo alias
+          const existingNode = nodeMap.get(targetId);
+          if (repoName && existingNode.kind !== 'external') {
+            existingNode.kind = 'external';
+            existingNode.repoName = repoName;
+          }
+
+          if (alias && alias !== 'self') {
+            edgeLabel = `@${alias}`;
+          }
+        }
+      }
+
+      // Add edge (deduplicated)
+      const edgeKey = `${filePath}→${targetId}`;
+      if (!edgeKeys.has(edgeKey)) {
+        edgeKeys.add(edgeKey);
+        const edge = { source: filePath, target: targetId };
+        if (edgeLabel) edge.label = edgeLabel;
+        edges.push(edge);
+      }
+    }
+  }
+
+  // ── Pass 3: fill in paramCount for all resolvable nodes ──────────────────
+  for (const [, node] of nodeMap) {
+    if (node.filePath && node.kind !== 'missing') {
+      try {
+        const tplText = fs.readFileSync(node.filePath, 'utf8');
+        const params = parseParameters(tplText);
+        node.paramCount = params.length;
+        node.requiredCount = params.filter(p => p.required).length;
+      } catch { /* ignore */ }
+    }
+  }
+
+  return {
+    nodes: Array.from(nodeMap.values()),
+    edges,
+  };
+}
+
+module.exports = {
+  collectYamlFiles,
+  isPipelineRoot,
+  extractTemplateRefs,
+  buildWorkspaceGraph,
+};

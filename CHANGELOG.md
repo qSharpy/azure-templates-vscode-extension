@@ -7,6 +7,41 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.4.0] - 2026-02-18
+
+### Added
+
+- **Template Graph View** — a new interactive force-directed graph panel in the same
+  Activity Bar container as the tree view:
+  - Scans **all YAML files** in the workspace (recursively) and renders every template
+    relationship as a graph — complementary to the tree view which focuses on the active file
+  - Node colours by type: 🔵 pipeline root, 🟢 local template, 🟣 external/cross-repo,
+    🔴 missing file, 🟠 unknown alias
+  - Click a node to open the file; right-click to copy the path to the clipboard
+  - Drag nodes to pin them; double-click to unpin; scroll to zoom; drag background to pan
+  - Hover a node to highlight its direct neighbours and dim the rest
+  - Filter box to highlight nodes by filename or repo name
+  - ↺ Refresh, ⊡ Fit, ⟳ Reset buttons in the toolbar
+  - Works fully offline — D3 v7 is bundled with the extension (`media/d3.min.js`)
+  - New command: `Azure Templates Navigator: Refresh Template Graph`
+  - New file: `graphDataBuilder.js` — pure Node.js workspace scanner (no vscode dependency,
+    fully unit-tested)
+  - New file: `graphWebViewProvider.js` — thin WebView wrapper
+  - New file: `media/graph.js` — D3 rendering logic
+
+- **Tree View: Cycle Detection** — circular template references are now detected and shown
+  as `↩ circular` leaf nodes with an issues icon instead of causing a stack overflow
+
+- **Tree View: Context Menu** — right-click any template node for:
+  - **Open to Side** — opens the template in a new split editor column
+  - **Copy Template Path** — copies the raw `template:` reference string to the clipboard
+
+- **Tree View: Improved Description Badge** — parameter count now shown as
+  `3 params · 2 req ⚠` (middle-dot separator, warning suffix when required params exist)
+
+- **New unit tests** — `test/unit/graphWebViewProvider.unit.test.js` (18 tests covering
+  `collectYamlFiles`, `isPipelineRoot`, `extractTemplateRefs`, and `buildWorkspaceGraph`)
+
 ## [1.3.0] - 2026-02-18
 
 ### Added

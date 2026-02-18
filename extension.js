@@ -5,6 +5,7 @@ const { hoverProvider, definitionProvider } = require('./hoverProvider');
 const { createDiagnosticProvider } = require('./diagnosticProvider');
 const { completionProvider } = require('./completionProvider');
 const { createTreeViewProvider } = require('./treeViewProvider');
+const { createGraphViewProvider } = require('./graphWebViewProvider');
 
 /**
  * Called once when the extension is first activated.
@@ -42,6 +43,10 @@ function activate(context) {
   // ── Tree view provider ────────────────────────────────────────────────────
   // Sidebar panel showing the template dependency tree for the active pipeline file
   createTreeViewProvider(context);
+
+  // ── Graph view provider ───────────────────────────────────────────────────
+  // Sidebar WebView panel showing a force-directed graph of ALL templates in the workspace
+  createGraphViewProvider(context);
 
   // ── Command: open a template file, optionally to the side ─────────────────
   // Args: { filePath: string, beside?: boolean }

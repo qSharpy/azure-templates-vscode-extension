@@ -2,7 +2,7 @@
 
 A must-have VS Code extension for anyone who develops, debugs, or reviews Azure Pipelines YAML files.
 
-Hover over any `- template:` reference to instantly see its parameters. Get real-time diagnostics for missing or unknown parameters. Autocomplete parameter names as you type. Hover over `$(variables)` to see their values. Explore the full template dependency tree in the sidebar — all with zero runtime dependencies.
+Hover over any `- template:` reference to instantly see its parameters. Get real-time diagnostics for missing or unknown parameters. Autocomplete parameter names as you type. Hover over `$(variables)` to see their values. Explore the full template dependency tree **and** an interactive workspace-wide dependency graph — all with zero runtime dependencies.
 
 ![hover demo](logo.png)
 
@@ -35,12 +35,40 @@ Hover over any `$(variableName)` or `${{ variables.name }}` reference to see:
 - For Azure DevOps system variables (`Build.*`, `System.*`, `Agent.*`, etc.): a link to the official docs
 
 ### 🌲 Template Dependency Tree View
-A sidebar panel (Activity Bar) showing the full template dependency tree for the currently active pipeline file:
-- Expand any node to see templates it references (nested templates supported)
+A sidebar panel in the **Azure Templates Navigator** Activity Bar showing the full dependency tree for the **currently active** pipeline file:
+- Expand any node to see templates it references (recursive, nested templates supported)
+- **Cycle detection** — circular references are shown as `↩ circular` leaf nodes instead of causing infinite recursion
 - Click any node to open the template file
-- Cross-repo templates show a 🔗 repo badge
-- Missing or unresolvable templates show a ⚠ warning icon
-- Refresh button in the panel title bar
+- **Right-click** any node for context menu actions:
+  - **Open to Side** — opens the template in a split editor column
+  - **Copy Template Path** — copies the raw `template:` reference string to the clipboard
+- Cross-repo templates show a 🔗 repo badge; missing templates show a ⚠ warning icon
+- Parameter count shown as `3 params · 2 req ⚠` in the dimmed description
+- Refresh button in the panel title bar; auto-refreshes on active editor change
+
+### 🗺️ Template Graph View
+An interactive force-directed graph in the **same Activity Bar panel** (below the tree view) showing **all YAML files** in the workspace and their template relationships at a glance:
+
+| Node colour | Meaning |
+|---|---|
+| 🔵 Blue | Pipeline root file (`trigger:` / `stages:` at top level) |
+| 🟢 Teal | Local template |
+| 🟣 Purple | External / cross-repo template |
+| 🔴 Red | Missing file (not found on disk) |
+| 🟠 Orange | Unknown `@alias` (not in `resources.repositories`) |
+
+**Interactions:**
+- **Click** a node → opens the file in the editor
+- **Drag** a node → pins it in place; **double-click** to unpin
+- **Scroll** → zoom in/out; **drag background** → pan
+- **Hover** a node → highlights its direct neighbours and dims the rest; shows a tooltip with path and parameter count
+- **Right-click** a node → copies the file path to the clipboard
+- **Filter box** → type to highlight matching nodes by filename or repo name
+- **↺ Refresh** → re-scans the workspace
+- **⊡ Fit** → fits the entire graph into the visible area
+- **⟳ Reset** → unpins all nodes and re-runs the simulation
+
+Works fully **offline** — D3 v7 is bundled with the extension.
 
 ### 🔗 Cross-Repository Template Support
 Resolves `@alias` references using `resources.repositories` declarations. The extension maps each alias to its repository name and resolves the template path as `{repo-root}/../{repo-name}/{template-path}` on the local filesystem.
@@ -166,14 +194,36 @@ Open the **Azure Templates Navigator** panel in the Activity Bar (left sidebar).
 
 ```
 📄 azure-pipelines.yml
-  ├── 📄 build-dotnet.yml          3 params, 2 required
-  ├── 📄 run-tests.yml             2 params, 1 required
-  ├── 🔗 deploy-stage.yml @shared  6 params, 3 required
+  ├── 📄 build-dotnet.yml          3 params · 2 req ⚠
+  ├── 📄 run-tests.yml             2 params · 1 req ⚠
+  ├── 🔗 deploy-stage.yml @shared  6 params · 3 req ⚠
   └── 📄 notify-teams.yml          3 params
         └── 📄 teams-webhook.yml   1 param
 ```
 
-Click any node to open the template file. Use the **↺ Refresh** button in the panel title bar to force a refresh.
+Click any node to open the template file. Right-click for **Open to Side** or **Copy Template Path**. Use the **↺ Refresh** button in the panel title bar to force a refresh.
+
+Circular references are detected and shown as leaf nodes with a `↩ circular` badge — no infinite recursion.
+
+---
+
+### Template Graph View
+
+The **Template Graph** panel (below the tree in the same Activity Bar container) scans **every YAML file** in the workspace and renders a force-directed graph of all template relationships.
+
+This is complementary to the tree view:
+
+| Tree View | Graph View |
+|---|---|
+| Depth-first drill-down from the **active file** | Workspace-wide map of **all templates** |
+| Shows the full call chain for one pipeline | Shows how all pipelines and templates interconnect |
+| Updates when you switch editors | Refreshes on demand or via the ↺ button |
+
+**Tips:**
+- Use the **Filter** box to highlight a specific template across the whole graph
+- Drag nodes to arrange them; they stay pinned until you double-click or hit **⟳ Reset**
+- Use **⊡ Fit** after a refresh to bring all nodes into view
+- The graph works fully offline — D3 v7 is bundled with the extension
 
 ---
 

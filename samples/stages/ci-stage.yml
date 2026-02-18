@@ -1,0 +1,98 @@
+# ============================================================
+# LEVEL 2 TEMPLATE — Stage template
+# Called by: samples/pipelines/deep-pipeline.yml
+# Calls:     samples/jobs/build-job.yml  (which in turn calls step templates)
+#
+# Middle level in the 3-level template chain:
+#   deep-pipeline.yml → ci-stage.yml → build-job.yml → step templates
+# ============================================================
+parameters:
+  # REQUIRED
+  - name: stageName
+    type: string
+  - name: project
+    type: string
+  - name: testProject
+    type: string
+  # OPTIONAL
+  - name: displayName
+    type: string
+    default: ''
+  - name: buildConfiguration
+    type: string
+    default: 'Release'
+  - name: dotnetVersion
+    type: string
+    default: '8.0.x'
+  - name: vmImage
+    type: string
+    default: 'ubuntu-latest'
+  - name: dockerRepository
+    type: string
+    default: ''
+  - name: dockerRegistryServiceConnection
+    type: string
+    default: ''
+  - name: dockerfile
+    type: string
+    default: 'Dockerfile'
+  - name: pushImage
+    type: boolean
+    default: false
+  - name: collectCoverage
+    type: boolean
+    default: true
+  - name: runIntegrationTests
+    type: boolean
+    default: false
+  - name: integrationTestProject
+    type: string
+    default: ''
+  - name: notifyWebhookUrl
+    type: string
+    default: ''
+  - name: dependsOn
+    type: object
+    default: []
+  - name: condition
+    type: string
+    default: 'succeeded()'
+
+stages:
+  - stage: ${{ parameters.stageName }}
+    displayName: ${{ coalesce(parameters.displayName, parameters.stageName) }}
+    dependsOn: ${{ parameters.dependsOn }}
+    condition: ${{ parameters.condition }}
+    pool:
+      vmImage: '${{ parameters.vmImage }}'
+
+    jobs:
+      # ── Job template: main build + unit tests ──────────────────
+      # This is LEVEL 3 — build-job.yml itself calls step templates
+      - template: /samples/jobs/build-job.yml
+        parameters:
+          jobName: 'MainBuild'
+          project: ${{ parameters.project }}
+          testProject: ${{ parameters.testProject }}
+          buildConfiguration: ${{ parameters.buildConfiguration }}
+          dotnetVersion: ${{ parameters.dotnetVersion }}
+          dockerRepository: ${{ parameters.dockerRepository }}
+          dockerRegistryServiceConnection: ${{ parameters.dockerRegistryServiceConnection }}
+          dockerfile: ${{ parameters.dockerfile }}
+          pushImage: ${{ parameters.pushImage }}
+          collectCoverage: ${{ parameters.collectCoverage }}
+          notifyWebhookUrl: ${{ parameters.notifyWebhookUrl }}
+          notifyMessage: 'Build stage "${{ parameters.stageName }}" completed'
+
+      # ── Job template: integration tests (conditional) ──────────
+      - ${{ if eq(parameters.runIntegrationTests, true) }}:
+        - template: /samples/jobs/build-job.yml
+          parameters:
+            jobName: 'IntegrationTests'
+            project: ${{ parameters.project }}
+            testProject: ${{ parameters.integrationTestProject }}
+            buildConfiguration: ${{ parameters.buildConfiguration }}
+            dotnetVersion: ${{ parameters.dotnetVersion }}
+            collectCoverage: false
+            dependsOn:
+              - MainBuild
