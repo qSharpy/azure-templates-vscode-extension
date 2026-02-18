@@ -289,9 +289,10 @@ function resolveLocalPath(ref, currentFile) {
  * @param {{ name: string, type: string, default: string|undefined, required: boolean }[]} params
  * @param {string} requiredColor  CSS hex color for required params
  * @param {string|null} repoName  External repo name (if cross-repo reference)
+ * @param {string|null} filePath  Absolute path to the resolved template file (for navigation links)
  * @returns {vscode.MarkdownString}
  */
-function buildHoverMarkdown(templateRef, params, requiredColor, repoName) {
+function buildHoverMarkdown(templateRef, params, requiredColor, repoName, filePath) {
   const md = new vscode.MarkdownString(undefined, true);
   md.isTrusted = true;
   md.supportHtml = true;
@@ -301,6 +302,20 @@ function buildHoverMarkdown(templateRef, params, requiredColor, repoName) {
 
   if (repoName) {
     md.appendMarkdown(`**🔗 External repository:** \`${repoName}\`\n\n`);
+  }
+
+  // Navigation links — only when we have a resolved file path.
+  // We route both links through our own registered command so that
+  // ViewColumn.Beside (= 3) is resolved at runtime by the extension host,
+  // not serialised into the command: URI where vscode.open ignores it.
+  if (filePath) {
+    const openArgs = encodeURIComponent(JSON.stringify([{ filePath, beside: false }]));
+    const openCmd = `command:azure-templates-navigator.openTemplate?${openArgs}`;
+
+    const sideArgs = encodeURIComponent(JSON.stringify([{ filePath, beside: true }]));
+    const sideCmd = `command:azure-templates-navigator.openTemplate?${sideArgs}`;
+
+    md.appendMarkdown(`[$(go-to-file) Open](${openCmd}) · [$(split-horizontal) Open to side](${sideCmd})\n\n`);
   }
 
   if (params.length === 0) {
@@ -383,7 +398,7 @@ const hoverProvider = {
     const requiredColor = config.get('requiredParameterColor', '#c92d35');
 
     const params = parseParameters(text);
-    const hoverMarkdown = buildHoverMarkdown(templateRef, params, requiredColor, repoName);
+    const hoverMarkdown = buildHoverMarkdown(templateRef, params, requiredColor, repoName, filePath);
 
     // Provide a code lens range covering the whole "template:" token
     const templateKeyStart = line.indexOf('template:');
@@ -396,8 +411,40 @@ const hoverProvider = {
   }
 };
 
+/**
+ * Definition provider: powers F12 / Cmd+Click / Ctrl+Click on a "template:" line.
+ * Returns a Location pointing at the first character of the resolved template file.
+ */
+const definitionProvider = {
+  /**
+   * @param {vscode.TextDocument} document
+   * @param {vscode.Position} position
+   * @returns {vscode.Location | undefined}
+   */
+  provideDefinition(document, position) {
+    const line = document.lineAt(position).text;
+
+    const match = /(?:^|\s)-?\s*template\s*:\s*(.+)$/.exec(line);
+    if (!match) return undefined;
+
+    const templateRef = match[1].trim();
+    const docText = document.getText();
+    const repoAliases = parseRepositoryAliases(docText);
+    const resolved = resolveTemplatePath(templateRef, document.uri.fsPath, repoAliases);
+
+    if (!resolved || resolved.unknownAlias || !resolved.filePath) return undefined;
+
+    const { filePath } = resolved;
+    if (!fs.existsSync(filePath)) return undefined;
+
+    const targetUri = vscode.Uri.file(filePath);
+    return new vscode.Location(targetUri, new vscode.Position(0, 0));
+  }
+};
+
 module.exports = {
   hoverProvider,
+  definitionProvider,
   // Export internals for unit testing
   parseParameters,
   parseRepositoryAliases,

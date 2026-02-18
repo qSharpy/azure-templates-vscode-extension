@@ -43,6 +43,12 @@
         "command": "azure-templates-navigator.setRequiredParameterColor",
         "title": "Set Required Parameter Color",
         "category": "Azure Templates Navigator"
+      },
+      {
+        "command": "azure-templates-navigator.openTemplate",
+        "title": "Open Template File",
+        "category": "Azure Templates Navigator",
+        "icon": "$(go-to-file)"
       }
     ],
     "languages": [

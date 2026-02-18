@@ -1,7 +1,7 @@
 'use strict';
 
 const vscode = require('vscode');
-const { hoverProvider } = require('./hoverProvider');
+const { hoverProvider, definitionProvider } = require('./hoverProvider');
 
 /**
  * Called once when the extension is first activated.
@@ -14,6 +14,50 @@ function activate(context) {
   const hoverDisposable = vscode.languages.registerHoverProvider(
     { language: 'yaml', scheme: '*' },
     hoverProvider
+  );
+
+  // Register the definition provider — enables F12 / Cmd+Click / Ctrl+Click navigation
+  const definitionDisposable = vscode.languages.registerDefinitionProvider(
+    { language: 'yaml', scheme: '*' },
+    definitionProvider
+  );
+
+  // Command: open a template file, optionally to the side.
+  // Args: { filePath: string, beside?: boolean }
+  //
+  // When opening "to the side" we want each new template to appear in its OWN
+  // column rather than replacing whatever is already in the split pane.
+  // Strategy: find the highest-numbered ViewColumn currently in use across all
+  // tab groups, then open in column = max + 1.  VS Code will create a new split
+  // for any column number that doesn't exist yet.
+  // If no split exists yet, ViewColumn.Beside (-2) is used as the initial split.
+  const openTemplateDisposable = vscode.commands.registerCommand(
+    'azure-templates-navigator.openTemplate',
+    async ({ filePath, beside = false } = {}) => {
+      if (!filePath) return;
+      const uri = vscode.Uri.file(filePath);
+
+      if (!beside) {
+        await vscode.commands.executeCommand('vscode.open', uri, vscode.ViewColumn.Active);
+        return;
+      }
+
+      // Collect all view-column numbers currently open
+      const usedColumns = vscode.window.tabGroups.all
+        .map(g => g.viewColumn)
+        .filter(c => typeof c === 'number' && c > 0);
+
+      let targetColumn;
+      if (usedColumns.length <= 1) {
+        // Only one (or zero) columns open — use Beside to create the first split
+        targetColumn = vscode.ViewColumn.Beside;
+      } else {
+        // Open in a brand-new column to the right of the rightmost existing one
+        targetColumn = Math.max(...usedColumns) + 1;
+      }
+
+      await vscode.commands.executeCommand('vscode.open', uri, targetColumn);
+    }
   );
 
   // Command: let the user pick a color for required parameters
@@ -65,7 +109,7 @@ function activate(context) {
     }
   );
 
-  context.subscriptions.push(hoverDisposable, colorCommandDisposable);
+  context.subscriptions.push(hoverDisposable, definitionDisposable, openTemplateDisposable, colorCommandDisposable);
 }
 
 function deactivate() {
