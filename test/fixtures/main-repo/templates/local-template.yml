@@ -1,0 +1,10 @@
+parameters:
+  # REQUIRED
+  - name: environment
+    type: string
+  - name: region
+    type: string
+    default: eastus
+
+steps:
+  - script: echo "Deploying to $(environment) in $(region)"

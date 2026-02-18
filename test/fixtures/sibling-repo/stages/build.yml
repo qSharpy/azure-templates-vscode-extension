@@ -1,0 +1,16 @@
+parameters:
+  # REQUIRED
+  - name: buildConfiguration
+    type: string
+  - name: dotnetVersion
+    type: string
+    default: '8.0.x'
+  - name: publishArtifact
+    type: boolean
+    default: true
+
+steps:
+  - task: UseDotNet@2
+    inputs:
+      version: $(dotnetVersion)
+  - script: dotnet build --configuration $(buildConfiguration)

@@ -1,0 +1,11 @@
+resources:
+  repositories:
+    - repository: templates
+      type: git
+      name: myorg/sibling-repo
+      ref: refs/heads/main
+
+stages:
+  - template: stages/build.yml@templates
+    parameters:
+      buildConfiguration: Release

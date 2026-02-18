@@ -1,7 +1,7 @@
 'use strict';
 
 const vscode = require('vscode');
-const hoverProvider = require('./hoverProvider');
+const { hoverProvider } = require('./hoverProvider');
 
 /**
  * Called once when the extension is first activated.
