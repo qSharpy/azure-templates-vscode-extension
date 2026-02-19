@@ -179,15 +179,35 @@ samples/
 
 ## Packaging & Publishing
 
+### Release checklist
+
+When creating a new release, always follow these steps **in order**:
+
+1. **Bump the version** in [`package.json`](package.json) (`"version"` field)
+2. **Update [`CHANGELOG.md`](CHANGELOG.md)** — move the new version out of `[Unreleased]` and add a dated `## [X.Y.Z] - YYYY-MM-DD` section describing all changes
+3. **Package** the extension:
+   ```bash
+   npm run package
+   ```
+4. **Publish** to the VS Code Marketplace:
+   ```bash
+   npm run publish
+   ```
+5. **Commit, tag, and push**:
+   ```bash
+   git add package.json CHANGELOG.md
+   git commit -m "release: vX.Y.Z — <short description>"
+   git tag vX.Y.Z
+   git push origin main --tags
+   ```
+
+> **Important:** Always create a git tag named `vX.Y.Z` (matching the version in `package.json`) and push it together with the commit. This keeps the git history aligned with Marketplace releases.
+
+### One-time setup
+
 ```bash
-# One-time: authenticate with your PAT
+# Authenticate with your PAT (only needed once per machine)
 npx vsce login bogdanbujor
-
-# Package (produces azure-templates-navigator-X.Y.Z.vsix)
-npm run package
-
-# Publish (reads version from package.json)
-npm run publish
 ```
 
 Files excluded from the `.vsix` package are listed in [`.vscodeignore`](.vscodeignore).
