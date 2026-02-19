@@ -80,6 +80,13 @@ const zoom = d3.zoom()
 svg.call(zoom);
 
 // ---------------------------------------------------------------------------
+// Legend toggle
+// ---------------------------------------------------------------------------
+document.getElementById('legend-toggle').addEventListener('click', () => {
+  document.getElementById('legend').classList.toggle('open');
+});
+
+// ---------------------------------------------------------------------------
 // Toolbar buttons
 // ---------------------------------------------------------------------------
 document.getElementById('btn-refresh').addEventListener('click', () => {

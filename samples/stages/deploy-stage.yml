@@ -1,11 +1,8 @@
 parameters:
-  # REQUIRED
   - name: environment
     type: string
-  # REQUIRED
   - name: azureSubscription
     type: string
-  # REQUIRED
   - name: appName
     type: string
   - name: dependsOn

@@ -1,5 +1,4 @@
 parameters:
-  # REQUIRED
   - name: environment
     type: string
   - name: region

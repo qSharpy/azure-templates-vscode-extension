@@ -7,6 +7,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.4.8] - 2026-02-19
+
+### Changed
+
+- **Required parameter detection now uses Azure Pipelines native semantics** — a parameter
+  is considered required when it has **no `default:` key**, which is exactly how Azure
+  Pipelines itself treats parameters at runtime. The previous `# REQUIRED` comment marker
+  is no longer needed and is no longer recognised. Any template that omits `default:` on a
+  parameter will automatically be flagged as required in hover tooltips, IntelliSense
+  completions, and diagnostics — with no extra annotation needed in the YAML.
+
+- **Template Graph: Legend is now collapsible** — the legend in the bottom-right corner of
+  the Template Graph is collapsed by default, showing only a small `▶ Legend` toggle header.
+  Clicking it expands the full colour key (Pipeline root, Local template, External, Missing
+  file, Unknown alias, ↓ downstream, ↑ upstream). Clicking again collapses it. The arrow
+  rotates smoothly to indicate state.
+
 ## [1.4.7] - 2026-02-19
 
 ### Added

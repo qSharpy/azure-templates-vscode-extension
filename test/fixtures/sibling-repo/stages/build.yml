@@ -1,5 +1,4 @@
 parameters:
-  # REQUIRED
   - name: buildConfiguration
     type: string
   - name: dotnetVersion

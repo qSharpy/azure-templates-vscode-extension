@@ -12,10 +12,12 @@ const vscode = require('vscode');
  * Azure Pipeline parameter blocks are well-structured:
  *
  *   parameters:
- *     # REQUIRED          ← optional marker on the line BEFORE "- name:"
  *     - name: myParam
  *       type: string
  *       default: 'foo'
+ *
+ * A parameter is considered **required** when it has no `default:` key —
+ * exactly how Azure Pipelines itself treats parameters at runtime.
  *
  * @param {string} text  Raw file contents
  * @returns {{ name: string, type: string, default: string|undefined, required: boolean }[]}
@@ -62,15 +64,6 @@ function parseParameters(text) {
 
     const paramName = nameMatch[2].trim();
 
-    // Check if the line immediately before (skipping blank lines) is "# REQUIRED"
-    let required = false;
-    for (let j = i - 1; j >= 0; j--) {
-      const prev = lines[j].trim();
-      if (prev === '') continue;
-      if (/^#\s*REQUIRED\s*$/i.test(prev)) required = true;
-      break;
-    }
-
     // Scan forward for type and default within this parameter's sub-block
     let type = 'string';
     let defaultValue;
@@ -99,6 +92,10 @@ function parseParameters(text) {
         continue;
       }
     }
+
+    // A parameter is required when it has no default value — this matches
+    // Azure Pipelines runtime behaviour exactly.
+    const required = defaultValue === undefined;
 
     params.push({ name: paramName, type, default: defaultValue, required });
   }

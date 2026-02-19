@@ -94,6 +94,8 @@ function validateCallSite(lines, templateLine, templateRef, currentFile, repoAli
   const passed = parsePassedParameters(lines, templateLine);
 
   // ── Check 1: Missing required parameters ──────────────────────────────────
+  // A parameter is required when it has no default value (Azure Pipelines
+  // runtime behaviour). If it is missing at the call site, that is an error.
   for (const p of declared) {
     if (p.required && !(p.name in passed)) {
       const templateLineText = lines[templateLine];
@@ -102,14 +104,11 @@ function validateCallSite(lines, templateLine, templateRef, currentFile, repoAli
         templateLine, templateKeyStart >= 0 ? templateKeyStart : 0,
         templateLine, templateLineText.length
       );
-      const hasDefault = p.default !== undefined;
-      const severity = hasDefault
-        ? vscode.DiagnosticSeverity.Information
-        : vscode.DiagnosticSeverity.Error;
-      const message = hasDefault
-        ? `Missing required parameter '${p.name}' (type: ${p.type}) for template '${templateRef.trim()}' — default value '${p.default}' will be used`
-        : `Missing required parameter '${p.name}' (type: ${p.type}) for template '${templateRef.trim()}'`;
-      const diag = new vscode.Diagnostic(range, message, severity);
+      const diag = new vscode.Diagnostic(
+        range,
+        `Missing required parameter '${p.name}' (type: ${p.type}) for template '${templateRef.trim()}'`,
+        vscode.DiagnosticSeverity.Error
+      );
       diag.source = 'Azure Templates Navigator';
       diag.code = 'missing-required-param';
       diagnostics.push(diag);

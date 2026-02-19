@@ -291,7 +291,7 @@ describe('buildWorkspaceGraph()', () => {
         'parameters:',
         '  - name: project',
         '    type: string',
-        '  # REQUIRED',
+        '    default: Release',
         '  - name: config',
         '    type: string',
       ].join('\n'),

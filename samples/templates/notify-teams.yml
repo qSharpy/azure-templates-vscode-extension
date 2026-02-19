@@ -1,12 +1,10 @@
 parameters:
-  # REQUIRED
   - name: webhookUrl
     type: string
     default: 'https://teams.webhook.url'
-  
-  # REQUIRED
   - name: message
     type: string
+    
   - name: title
     type: string
     default: 'Pipeline Notification'

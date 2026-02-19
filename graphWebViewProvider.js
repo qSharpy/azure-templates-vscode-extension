@@ -600,13 +600,42 @@ class TemplateGraphProvider {
       background: var(--vscode-sideBar-background);
       border: 1px solid var(--vscode-panel-border);
       border-radius: 4px;
-      padding: 6px 10px;
       font-size: 10px;
       line-height: 1.8;
-      pointer-events: none;
-      opacity: 0.85;
+      opacity: 0.9;
+      user-select: none;
     }
-    .legend-item { display: flex; align-items: center; gap: 6px; }
+    #legend-toggle {
+      display: flex;
+      align-items: center;
+      gap: 5px;
+      padding: 4px 10px;
+      cursor: pointer;
+      font-size: 10px;
+      color: var(--vscode-foreground);
+      white-space: nowrap;
+    }
+    #legend-toggle:hover {
+      background: var(--vscode-list-hoverBackground);
+      border-radius: 4px;
+    }
+    #legend-arrow {
+      font-size: 8px;
+      transition: transform 0.15s ease;
+      display: inline-block;
+    }
+    #legend.open #legend-arrow {
+      transform: rotate(90deg);
+    }
+    #legend-body {
+      display: none;
+      padding: 0 10px 6px 10px;
+      border-top: 1px solid var(--vscode-panel-border);
+    }
+    #legend.open #legend-body {
+      display: block;
+    }
+    .legend-item { display: flex; align-items: center; gap: 6px; margin-top: 3px; }
     .legend-dot {
       width: 10px; height: 10px;
       border-radius: 50%;
@@ -673,14 +702,19 @@ class TemplateGraphProvider {
     </div>
 
     <div id="legend">
-      <div class="legend-item"><div class="legend-dot" style="background:#4e9de0"></div>Pipeline root</div>
-      <div class="legend-item"><div class="legend-dot" style="background:#3dba8a"></div>Local template</div>
-      <div class="legend-item"><div class="legend-dot" style="background:#9b6fd4"></div>External (cross-repo)</div>
-      <div class="legend-item"><div class="legend-dot" style="background:#e05c5c"></div>Missing file</div>
-      <div class="legend-item"><div class="legend-dot" style="background:#e09a3d"></div>Unknown alias</div>
-      <div style="margin-top:4px;border-top:1px solid var(--vscode-panel-border);padding-top:4px">
-        <div class="legend-item"><div style="width:18px;height:2px;background:#4e9de0;flex-shrink:0"></div>↓ downstream</div>
-        <div class="legend-item"><div style="width:18px;height:2px;background:#e09a3d;flex-shrink:0;border-top:2px dashed #e09a3d;margin-top:-2px"></div>↑ upstream</div>
+      <div id="legend-toggle" title="Toggle legend">
+        <span id="legend-arrow">▶</span> Legend
+      </div>
+      <div id="legend-body">
+        <div class="legend-item"><div class="legend-dot" style="background:#4e9de0"></div>Pipeline root</div>
+        <div class="legend-item"><div class="legend-dot" style="background:#3dba8a"></div>Local template</div>
+        <div class="legend-item"><div class="legend-dot" style="background:#9b6fd4"></div>External (cross-repo)</div>
+        <div class="legend-item"><div class="legend-dot" style="background:#e05c5c"></div>Missing file</div>
+        <div class="legend-item"><div class="legend-dot" style="background:#e09a3d"></div>Unknown alias</div>
+        <div style="margin-top:5px;border-top:1px solid var(--vscode-panel-border);padding-top:5px">
+          <div class="legend-item"><div style="width:18px;height:2px;background:#4e9de0;flex-shrink:0"></div>↓ downstream</div>
+          <div class="legend-item"><div style="width:18px;height:2px;background:#e09a3d;flex-shrink:0;border-top:2px dashed #e09a3d;margin-top:-2px"></div>↑ upstream</div>
+        </div>
       </div>
     </div>
   </div>

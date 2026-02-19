@@ -120,10 +120,9 @@ parameters:
     assert.strictEqual(params[2].type, 'boolean');
   });
 
-  it('marks parameter required when preceded by # REQUIRED', () => {
+  it('marks parameter required when it has no default value', () => {
     const yaml = `
 parameters:
-  # REQUIRED
   - name: subscriptionId
     type: string
   - name: region
@@ -135,14 +134,14 @@ parameters:
     assert.strictEqual(params[1].required, false);
   });
 
-  it('# required is case-insensitive', () => {
+  it('marks parameter not required when it has a default value', () => {
     const yaml = `
 parameters:
-  # required
   - name: apiKey
     type: string
+    default: ''
 `;
-    assert.strictEqual(parseParameters(yaml)[0].required, true);
+    assert.strictEqual(parseParameters(yaml)[0].required, false);
   });
 
   it('default is undefined when not specified', () => {
@@ -208,16 +207,18 @@ stages:
     assert.strictEqual(params.length, 2, 'should parse both params despite CRLF + baseIndent=0');
     assert.strictEqual(params[0].name, 'appName');
     assert.strictEqual(params[0].type, 'string');
+    assert.strictEqual(params[0].required, true,  'appName has no default — should be required');
     assert.strictEqual(params[1].name, 'region');
     assert.strictEqual(params[1].default, 'eastus');
+    assert.strictEqual(params[1].required, false, 'region has a default — should not be required');
   });
 
-  it('detects # REQUIRED marker with CRLF line endings', () => {
-    const yaml = 'parameters:\r\n# REQUIRED\r\n- name: purposeID\r\n  type: string\r\n- name: optional\r\n  type: string\r\n  default: foo\r\n';
+  it('derives required from absence of default with CRLF line endings', () => {
+    const yaml = 'parameters:\r\n- name: purposeID\r\n  type: string\r\n- name: optional\r\n  type: string\r\n  default: foo\r\n';
     const params = parseParameters(yaml);
     assert.strictEqual(params.length, 2);
-    assert.strictEqual(params[0].required, true,  'purposeID should be required');
-    assert.strictEqual(params[1].required, false, 'optional should not be required');
+    assert.strictEqual(params[0].required, true,  'purposeID has no default — should be required');
+    assert.strictEqual(params[1].required, false, 'optional has a default — should not be required');
   });
 
 // ---------------------------------------------------------------------------
