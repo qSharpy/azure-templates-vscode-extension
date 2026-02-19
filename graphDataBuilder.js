@@ -277,9 +277,143 @@ function buildWorkspaceGraph(workspaceRoot, subPath) {
   };
 }
 
+// ---------------------------------------------------------------------------
+// buildFileGraph
+// ---------------------------------------------------------------------------
+
+/**
+ * Builds a scoped graph for a single file: the file itself as the root node,
+ * plus all templates it directly references (depth = 1 only).
+ * This mirrors what the tree view shows for the active file.
+ *
+ * @param {string} filePath      Absolute path to the pipeline / template file
+ * @param {string} workspaceRoot Absolute path to the workspace root (used for
+ *                               resolving relative template references)
+ * @returns {{ nodes: GraphNode[], edges: GraphEdge[] }}
+ */
+function buildFileGraph(filePath, workspaceRoot) {
+  /** @type {Map<string, GraphNode>} */
+  const nodeMap = new Map();
+  /** @type {GraphEdge[]} */
+  const edges = [];
+  /** @type {Set<string>} */
+  const edgeKeys = new Set();
+
+  // ── Root node ─────────────────────────────────────────────────────────────
+  let rootText = '';
+  try { rootText = fs.readFileSync(filePath, 'utf8'); } catch { /* skip */ }
+
+  const rootKind = isPipelineRoot(rootText) ? 'pipeline' : 'local';
+  const rootParams = parseParameters(rootText);
+  nodeMap.set(filePath, {
+    id: filePath,
+    label: path.basename(filePath),
+    kind: rootKind,
+    filePath,
+    paramCount: rootParams.length,
+    requiredCount: rootParams.filter(p => p.required).length,
+  });
+
+  // ── Direct children (depth = 1) ───────────────────────────────────────────
+  const repoAliases = parseRepositoryAliases(rootText);
+  const refs = extractTemplateRefs(filePath);
+
+  for (const { templateRef } of refs) {
+    // Skip variable expressions
+    if (/\$\{/.test(templateRef) || /\$\(/.test(templateRef)) continue;
+
+    const resolved = resolveTemplatePath(templateRef, filePath, repoAliases);
+    if (!resolved) continue;
+
+    let targetId;
+    let edgeLabel;
+
+    if (resolved.unknownAlias) {
+      targetId = `UNKNOWN_ALIAS:${resolved.alias}:${templateRef}`;
+      if (!nodeMap.has(targetId)) {
+        nodeMap.set(targetId, {
+          id: targetId,
+          label: path.basename(templateRef.split('@')[0]),
+          kind: 'unknown',
+          alias: resolved.alias,
+          paramCount: 0,
+          requiredCount: 0,
+        });
+      }
+      edgeLabel = `@${resolved.alias}`;
+    } else {
+      const { filePath: resolvedPath, repoName, alias } = resolved;
+      if (!resolvedPath) continue;
+
+      if (!fs.existsSync(resolvedPath)) {
+        targetId = `MISSING:${resolvedPath}`;
+        if (!nodeMap.has(targetId)) {
+          nodeMap.set(targetId, {
+            id: targetId,
+            label: path.basename(resolvedPath),
+            kind: 'missing',
+            filePath: resolvedPath,
+            repoName,
+            paramCount: 0,
+            requiredCount: 0,
+          });
+        }
+      } else {
+        targetId = resolvedPath;
+        if (!nodeMap.has(targetId)) {
+          let childParamCount = 0;
+          let childRequiredCount = 0;
+          try {
+            const childText = fs.readFileSync(resolvedPath, 'utf8');
+            const childParams = parseParameters(childText);
+            childParamCount = childParams.length;
+            childRequiredCount = childParams.filter(p => p.required).length;
+          } catch { /* ignore */ }
+
+          nodeMap.set(targetId, {
+            id: targetId,
+            label: path.basename(resolvedPath),
+            kind: repoName ? 'external' : 'local',
+            filePath: resolvedPath,
+            repoName,
+            paramCount: childParamCount,
+            requiredCount: childRequiredCount,
+          });
+        }
+
+        // Upgrade to external if referenced via alias
+        const existingNode = nodeMap.get(targetId);
+        if (repoName && existingNode.kind !== 'external') {
+          existingNode.kind = 'external';
+          existingNode.repoName = repoName;
+        }
+
+        if (alias && alias !== 'self') {
+          edgeLabel = `@${alias}`;
+        }
+      }
+    }
+
+    // Add edge (deduplicated)
+    const edgeKey = `${filePath}→${targetId}`;
+    if (!edgeKeys.has(edgeKey)) {
+      edgeKeys.add(edgeKey);
+      const edge = { source: filePath, target: targetId };
+      if (edgeLabel) edge.label = edgeLabel;
+      edges.push(edge);
+    }
+  }
+
+  return {
+    nodes: Array.from(nodeMap.values()),
+    edges,
+  };
+}
+
 module.exports = {
   collectYamlFiles,
   isPipelineRoot,
   extractTemplateRefs,
   buildWorkspaceGraph,
+  buildFileGraph,
 };

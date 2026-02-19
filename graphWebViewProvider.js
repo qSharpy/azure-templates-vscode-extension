@@ -3,6 +3,7 @@
 const vscode = require('vscode');
 const {
   buildWorkspaceGraph,
+  buildFileGraph,
 } = require('./graphDataBuilder');
 
 // ---------------------------------------------------------------------------
@@ -33,6 +34,19 @@ class TemplateGraphProvider {
      * @type {string|null}
      */
     this._rootPathOverride = null;
+    /**
+     * Absolute path of the currently active YAML file.
+     * When set (and _fileScopeEnabled is true), the graph is scoped to that
+     * file's direct template references only.
+     * @type {string|null}
+     */
+    this._activeFile = null;
+    /**
+     * Whether the "scope to current file" mode is enabled.
+     * Defaults to true so the graph automatically scopes to the open file.
+     * @type {boolean}
+     */
+    this._fileScopeEnabled = true;
   }
 
   /**
@@ -67,6 +81,24 @@ class TemplateGraphProvider {
    */
   refresh() {
     if (this._view) {
+      this._sendGraphData(this._view.webview);
+    }
+  }
+
+  /**
+   * Called when the active text editor changes.
+   * Updates the active file and refreshes the graph if file-scope mode is on.
+   * @param {vscode.TextEditor|undefined} editor
+   */
+  onActiveEditorChanged(editor) {
+    const newFile = (editor && editor.document.languageId === 'yaml')
+      ? editor.document.uri.fsPath
+      : null;
+
+    const changed = newFile !== this._activeFile;
+    this._activeFile = newFile;
+
+    if (changed && this._fileScopeEnabled && this._view) {
       this._sendGraphData(this._view.webview);
     }
   }
@@ -107,6 +139,13 @@ class TemplateGraphProvider {
    */
   _handleMessage(msg, webview) {
     switch (msg.type) {
+      case 'setFileScope': {
+        // Toggle file-scope mode on/off from the WebView toolbar button.
+        this._fileScopeEnabled = !!msg.enabled;
+        this._sendGraphData(webview);
+        break;
+      }
+
       case 'openFile':
         if (msg.filePath) {
           vscode.commands.executeCommand(
@@ -195,11 +234,41 @@ class TemplateGraphProvider {
     }
 
     const workspaceRoot = workspaceFolders[0].uri.fsPath;
+
+    // ── File-scope mode: show only the active file + its direct children ────
+    if (this._fileScopeEnabled && this._activeFile) {
+      try {
+        const { nodes, edges } = buildFileGraph(this._activeFile, workspaceRoot);
+        webview.postMessage({
+          type: 'graphData',
+          nodes,
+          edges,
+          rootPath: '',
+          fileScopeEnabled: true,
+          scopedFile: this._activeFile,
+        });
+      } catch (err) {
+        webview.postMessage({
+          type: 'error',
+          message: err.message || String(err),
+        });
+      }
+      return;
+    }
+
+    // ── Workspace / path-scoped mode ─────────────────────────────────────────
     const subPath = this._getEffectiveRootPath();
 
     try {
       const { nodes, edges } = buildWorkspaceGraph(workspaceRoot, subPath);
-      webview.postMessage({ type: 'graphData', nodes, edges, rootPath: subPath });
+      webview.postMessage({
+        type: 'graphData',
+        nodes,
+        edges,
+        rootPath: subPath,
+        fileScopeEnabled: false,
+        scopedFile: null,
+      });
     } catch (err) {
       webview.postMessage({
         type: 'error',
@@ -303,6 +372,19 @@ class TemplateGraphProvider {
     }
     #btn-toggle-path.has-path .path-dot {
       display: block;
+    }
+
+    /* File-scope toggle button — highlights when file scope is active */
+    #btn-file-scope.active {
+      background: var(--vscode-button-background);
+      color: var(--vscode-button-foreground);
+    }
+    #btn-file-scope.active:hover {
+      background: var(--vscode-button-hoverBackground);
+    }
+    #btn-file-scope:disabled {
+      opacity: 0.4;
+      cursor: not-allowed;
     }
 
     #stats {
@@ -538,6 +620,7 @@ class TemplateGraphProvider {
     <button id="btn-refresh" title="Refresh graph">↺ Refresh</button>
     <button id="btn-fit"     title="Fit graph to view">⊡ Fit</button>
     <button id="btn-reset"   title="Reset node positions">⟳ Reset</button>
+    <button id="btn-file-scope" title="Scope graph to the currently open file (shows parent + direct children only)" class="active">📄 File</button>
     <button id="btn-toggle-path" title="Set a sub-directory path to scope the graph">📁 Path<span class="path-dot"></span></button>
     <span id="stats"></span>
     <button id="btn-expand" title="Open graph in full editor panel" style="${expandBtnStyle}">⤢ Expand</button>
@@ -654,6 +737,16 @@ function createGraphViewProvider(context) {
       () => provider.openPanel()
     )
   );
+
+  // Active-editor listener: refresh graph when the user switches to a YAML file
+  context.subscriptions.push(
+    vscode.window.onDidChangeActiveTextEditor(
+      editor => provider.onActiveEditorChanged(editor)
+    )
+  );
+
+  // Seed with the currently active editor (if any)
+  provider.onActiveEditorChanged(vscode.window.activeTextEditor);
 
   return provider;
 }

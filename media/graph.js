@@ -15,6 +15,7 @@ let allEdges = [];
 let simulation = null;
 let filterText = '';
 let currentRootPath = '';   // tracks the active path filter
+let fileScopeEnabled = true; // mirrors _fileScopeEnabled on the extension side
 
 // ---------------------------------------------------------------------------
 // Colour palette (matches legend in HTML)
@@ -59,6 +60,7 @@ const searchInput    = document.getElementById('search');
 const btnClearSearch = document.getElementById('btn-clear-search');
 const pathBar        = document.getElementById('path-bar');
 const btnTogglePath  = document.getElementById('btn-toggle-path');
+const btnFileScope   = document.getElementById('btn-file-scope');
 const rootPathInput  = document.getElementById('root-path');
 const btnApplyPath   = document.getElementById('btn-apply-path');
 const btnClearPath   = document.getElementById('btn-clear-path');
@@ -94,6 +96,29 @@ document.getElementById('btn-reset').addEventListener('click', () => {
 
 document.getElementById('btn-expand').addEventListener('click', () => {
   vscode.postMessage({ type: 'expand' });
+});
+
+// ---------------------------------------------------------------------------
+// File-scope toggle button
+// ---------------------------------------------------------------------------
+
+/**
+ * Updates the visual state of the file-scope button to match `fileScopeEnabled`.
+ */
+function updateFileScopeButton() {
+  if (fileScopeEnabled) {
+    btnFileScope.classList.add('active');
+    btnFileScope.title = 'Showing current file only — click to show full workspace graph';
+  } else {
+    btnFileScope.classList.remove('active');
+    btnFileScope.title = 'Scope graph to the currently open file (shows parent + direct children only)';
+  }
+}
+
+btnFileScope.addEventListener('click', () => {
+  fileScopeEnabled = !fileScopeEnabled;
+  updateFileScopeButton();
+  vscode.postMessage({ type: 'setFileScope', enabled: fileScopeEnabled });
 });
 
 searchInput.addEventListener('input', () => {
@@ -245,6 +270,12 @@ window.addEventListener('message', (event) => {
   const msg = event.data;
   switch (msg.type) {
     case 'graphData':
+      // Sync file-scope state from the extension (e.g. on first load)
+      if (typeof msg.fileScopeEnabled === 'boolean' && msg.fileScopeEnabled !== fileScopeEnabled) {
+        fileScopeEnabled = msg.fileScopeEnabled;
+        updateFileScopeButton();
+      }
+
       // Sync the path input with whatever the extension used (e.g. from the
       // persisted workspace setting on first load).
       if (typeof msg.rootPath === 'string' && msg.rootPath !== rootPathInput.value) {
@@ -252,7 +283,9 @@ window.addEventListener('message', (event) => {
         currentRootPath = msg.rootPath;
         updatePathInputStyle();
       }
-      renderGraph(msg.nodes, msg.edges);
+
+      // Update stats label to show scope context
+      renderGraph(msg.nodes, msg.edges, msg.scopedFile);
       break;
     case 'noWorkspace':
       showEmpty('Open a workspace folder to explore template dependencies.');
@@ -371,9 +404,13 @@ function applyHierarchicalPositions(nodes, layerMap, width, height) {
  * @param {import('../graphWebViewProvider').GraphNode[]} nodes
  * @param {import('../graphWebViewProvider').GraphEdge[]} edges
  */
-function renderGraph(nodes, edges) {
+function renderGraph(nodes, edges, scopedFile) {
   if (!nodes || nodes.length === 0) {
-    showEmpty();
+    if (fileScopeEnabled) {
+      showEmpty('Open a YAML pipeline file to scope the graph to it.');
+    } else {
+      showEmpty();
+    }
     return;
   }
 
@@ -382,7 +419,12 @@ function renderGraph(nodes, edges) {
   allNodes = nodes.map(n => Object.assign({}, n));
   allEdges = edges.map(e => Object.assign({}, e));
 
-  statsEl.textContent = `${nodes.length} files · ${edges.length} refs`;
+  if (scopedFile) {
+    const fname = scopedFile.replace(/\\/g, '/').split('/').pop();
+    statsEl.textContent = `📄 ${fname} · ${nodes.length} nodes · ${edges.length} refs`;
+  } else {
+    statsEl.textContent = `${nodes.length} files · ${edges.length} refs`;
+  }
 
   // Clear previous render
   d3.select(edgesLayer).selectAll('*').remove();
