@@ -2,7 +2,7 @@
   "name": "azure-templates-navigator",
   "displayName": "Azure Templates Navigator",
   "description": "Hover over Azure Pipeline template references to instantly see their parameters. Click to open the template file. Validates parameters, provides IntelliSense autocomplete, variable hover, a template dependency tree view, and an interactive workspace-wide template graph.",
-  "version": "1.4.3",
+  "version": "1.4.6",
   "publisher": "bogdanbujor",
   "icon": "logo.png",
   "repository": {

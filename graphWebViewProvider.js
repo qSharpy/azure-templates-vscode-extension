@@ -648,6 +648,10 @@ class TemplateGraphProvider {
                 markerWidth="6" markerHeight="6" orient="auto">
           <path d="M0,-4L10,0L0,4" fill="#888" />
         </marker>
+        <marker id="arrow-upstream" viewBox="0 -4 10 8" refX="20" refY="0"
+                markerWidth="6" markerHeight="6" orient="auto">
+          <path d="M0,-4L10,0L0,4" fill="#e09a3d" />
+        </marker>
         <filter id="shadow" x="-20%" y="-20%" width="140%" height="140%">
           <feDropShadow dx="0" dy="1" stdDeviation="2" flood-opacity="0.3"/>
         </filter>
@@ -674,6 +678,10 @@ class TemplateGraphProvider {
       <div class="legend-item"><div class="legend-dot" style="background:#9b6fd4"></div>External (cross-repo)</div>
       <div class="legend-item"><div class="legend-dot" style="background:#e05c5c"></div>Missing file</div>
       <div class="legend-item"><div class="legend-dot" style="background:#e09a3d"></div>Unknown alias</div>
+      <div style="margin-top:4px;border-top:1px solid var(--vscode-panel-border);padding-top:4px">
+        <div class="legend-item"><div style="width:18px;height:2px;background:#4e9de0;flex-shrink:0"></div>↓ downstream</div>
+        <div class="legend-item"><div style="width:18px;height:2px;background:#e09a3d;flex-shrink:0;border-top:2px dashed #e09a3d;margin-top:-2px"></div>↑ upstream</div>
+      </div>
     </div>
   </div>
 

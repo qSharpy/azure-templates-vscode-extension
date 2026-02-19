@@ -8,6 +8,10 @@ const {
   parseRepositoryAliases,
   resolveTemplatePath,
 } = require('./hoverProvider');
+const {
+  collectYamlFiles,
+  extractTemplateRefs,
+} = require('./graphDataBuilder');
 
 /**
  * Represents a single node in the template dependency tree.
@@ -20,6 +24,8 @@ class TemplateNode {
    * @param {string|null} opts.templateRef  Raw template reference string (e.g. "templates/build.yml@alias")
    * @param {string|null} opts.repoName     External repo name, or null for local templates
    * @param {boolean}     opts.isRoot       True for the root pipeline file node
+   * @param {boolean}     opts.isUpstreamGroup  True for the "Called by" group header node
+   * @param {boolean}     opts.isUpstreamCaller True for an upstream caller node
    * @param {boolean}     opts.notFound     True when the file could not be resolved/read
    * @param {boolean}     opts.unknownAlias True when the @alias is not in resources.repositories
    * @param {boolean}     opts.isCycle      True when this reference creates a circular dependency
@@ -27,6 +33,7 @@ class TemplateNode {
    * @param {number}      opts.paramCount   Number of parameters declared in the template
    * @param {number}      opts.requiredCount Number of required parameters
    * @param {boolean}     opts.hasChildren  True when the template file itself contains template refs
+   * @param {TemplateNode[]} opts.upstreamCallers Pre-computed upstream caller nodes (for the group)
    */
   constructor({
     label,
@@ -34,6 +41,8 @@ class TemplateNode {
     templateRef = null,
     repoName = null,
     isRoot = false,
+    isUpstreamGroup = false,
+    isUpstreamCaller = false,
     notFound = false,
     unknownAlias = false,
     isCycle = false,
@@ -41,12 +50,15 @@ class TemplateNode {
     paramCount = 0,
     requiredCount = 0,
     hasChildren = false,
+    upstreamCallers = null,
   }) {
     this.label = label;
     this.filePath = filePath;
     this.templateRef = templateRef;
     this.repoName = repoName;
     this.isRoot = isRoot;
+    this.isUpstreamGroup = isUpstreamGroup;
+    this.isUpstreamCaller = isUpstreamCaller;
     this.notFound = notFound;
     this.unknownAlias = unknownAlias;
     this.isCycle = isCycle;
@@ -54,7 +66,64 @@ class TemplateNode {
     this.paramCount = paramCount;
     this.requiredCount = requiredCount;
     this.hasChildren = hasChildren;
+    this.upstreamCallers = upstreamCallers;
   }
+}
+
+/**
+ * Scans the entire workspace for YAML files that reference `targetFilePath`
+ * and returns an array of TemplateNode objects representing each caller.
+ *
+ * @param {string} targetFilePath  Absolute path of the file to find callers for
+ * @param {string} workspaceRoot   Absolute path of the workspace root
+ * @returns {TemplateNode[]}
+ */
+function getUpstreamCallers(targetFilePath, workspaceRoot) {
+  const callers = [];
+  const allYaml = collectYamlFiles(workspaceRoot);
+
+  for (const callerFile of allYaml) {
+    if (callerFile === targetFilePath) continue;
+
+    let callerText = '';
+    try { callerText = fs.readFileSync(callerFile, 'utf8'); } catch { continue; }
+
+    const callerAliases = parseRepositoryAliases(callerText);
+    const callerRefs = extractTemplateRefs(callerFile);
+
+    let refsThisFile = false;
+    for (const { templateRef } of callerRefs) {
+      if (/\$\{/.test(templateRef) || /\$\(/.test(templateRef)) continue;
+      const resolved = resolveTemplatePath(templateRef, callerFile, callerAliases);
+      if (!resolved) continue;
+      if (!resolved.filePath || resolved.filePath !== targetFilePath) continue;
+
+      refsThisFile = true;
+      break;
+    }
+
+    if (!refsThisFile) continue;
+
+    let paramCount = 0;
+    let requiredCount = 0;
+    try {
+      const params = parseParameters(callerText);
+      paramCount = params.length;
+      requiredCount = params.filter(p => p.required).length;
+    } catch { /* ignore */ }
+
+    callers.push(new TemplateNode({
+      label: path.basename(callerFile),
+      filePath: callerFile,
+      isUpstreamCaller: true,
+      paramCount,
+      requiredCount,
+      // upstream callers may themselves have downstream children
+      hasChildren: false,
+    }));
+  }
+
+  return callers;
 }
 
 /**
@@ -209,6 +278,23 @@ class TemplateDependencyProvider {
    * @returns {vscode.TreeItem}
    */
   getTreeItem(node) {
+    // ── Upstream group header ─────────────────────────────────────────────
+    if (node.isUpstreamGroup) {
+      const count = node.upstreamCallers ? node.upstreamCallers.length : 0;
+      const collapsible = count > 0
+        ? vscode.TreeItemCollapsibleState.Expanded
+        : vscode.TreeItemCollapsibleState.None;
+      const item = new vscode.TreeItem(node.label, collapsible);
+      item.iconPath = new vscode.ThemeIcon('arrow-down');
+      item.description = count === 0 ? 'no callers found' : `${count} caller${count !== 1 ? 's' : ''}`;
+      const md = new vscode.MarkdownString(undefined, true);
+      md.isTrusted = true;
+      md.appendMarkdown(`**⬆ Upstream callers**\n\nFiles in this workspace that reference the current template.`);
+      item.tooltip = md;
+      item.contextValue = 'upstreamGroup';
+      return item;
+    }
+
     // Cycle and missing nodes are leaves; resolved nodes are expandable only
     // when the underlying file actually contains further template references.
     const collapsible = node.isRoot
@@ -223,6 +309,8 @@ class TemplateDependencyProvider {
     if (node.isCycle) {
       item.iconPath = new vscode.ThemeIcon('issues', new vscode.ThemeColor('list.warningForeground'));
     } else if (node.isRoot) {
+      item.iconPath = new vscode.ThemeIcon('file-code');
+    } else if (node.isUpstreamCaller) {
       item.iconPath = new vscode.ThemeIcon('file-code');
     } else if (node.unknownAlias) {
       item.iconPath = new vscode.ThemeIcon('question', new vscode.ThemeColor('list.warningForeground'));
@@ -244,6 +332,10 @@ class TemplateDependencyProvider {
       md.appendMarkdown(`_Expanding this node would cause infinite recursion._`);
     } else if (node.isRoot) {
       md.appendMarkdown(`**📄 Pipeline file**\n\n\`${node.filePath}\``);
+    } else if (node.isUpstreamCaller) {
+      md.appendMarkdown(`**⬆ Upstream caller**\n\n`);
+      md.appendMarkdown(`**File:** \`${node.filePath}\`\n\n`);
+      md.appendMarkdown(`_This file references the current template._`);
     } else if (node.unknownAlias) {
       md.appendMarkdown(`**⚠️ Unknown alias:** \`@${node.alias}\`\n\n`);
       md.appendMarkdown(`Add a \`resources.repositories\` entry with \`repository: ${node.alias}\`.`);
@@ -270,7 +362,7 @@ class TemplateDependencyProvider {
     // ── Description (shown dimmed after the label) ─────────────────────────
     if (node.isCycle) {
       item.description = '↩ circular';
-    } else if (!node.isRoot && !node.notFound && !node.unknownAlias) {
+    } else if (!node.isRoot && !node.isUpstreamCaller && !node.notFound && !node.unknownAlias) {
       const parts = [];
       if (node.paramCount > 0) {
         parts.push(`${node.paramCount} param${node.paramCount !== 1 ? 's' : ''}`);
@@ -299,6 +391,7 @@ class TemplateDependencyProvider {
     // ── Context value for context-menu contributions ───────────────────────
     item.contextValue = node.isCycle ? 'templateCycle'
       : node.isRoot ? 'pipelineRoot'
+      : node.isUpstreamCaller ? 'templateUpstreamCaller'
       : node.notFound ? 'templateNotFound'
       : node.unknownAlias ? 'templateUnknownAlias'
       : node.repoName ? 'templateExternal'
@@ -312,24 +405,51 @@ class TemplateDependencyProvider {
    * @returns {TemplateNode[]}
    */
   getChildren(node) {
-    // ── Root level: show the active pipeline file ─────────────────────────
+    // ── Root level: "Called by" group first, then the focal file ─────────
     if (!node) {
       if (!this._activeFile) {
         return [];
       }
+
+      // Compute upstream callers at root level so the group appears above
+      // the focal file node (VS Code tree can't place items above the root
+      // node, so we make both siblings at the top level instead).
+      const workspaceFolders = require('vscode').workspace.workspaceFolders;
+      const workspaceRoot = workspaceFolders && workspaceFolders.length > 0
+        ? workspaceFolders[0].uri.fsPath
+        : path.dirname(this._activeFile);
+      const upstreamCallers = getUpstreamCallers(this._activeFile, workspaceRoot);
+
+      const upstreamGroup = new TemplateNode({
+        label: 'Called by',
+        isUpstreamGroup: true,
+        upstreamCallers,
+      });
+
       const fileName = path.basename(this._activeFile);
       const root = new TemplateNode({
         label: fileName,
         filePath: this._activeFile,
         isRoot: true,
       });
-      return [root];
+
+      return [upstreamGroup, root];
     }
 
-    // ── Root node: scan the pipeline file for template references ─────────
+    // ── Root node: show only downstream children ──────────────────────────
     if (node.isRoot && node.filePath) {
       const visited = new Set([node.filePath]);
       return getTemplateChildren(node.filePath, visited);
+    }
+
+    // ── Upstream group: return the pre-computed caller nodes ──────────────
+    if (node.isUpstreamGroup) {
+      return node.upstreamCallers || [];
+    }
+
+    // ── Upstream caller node: no further expansion ────────────────────────
+    if (node.isUpstreamCaller) {
+      return [];
     }
 
     // ── Template node: scan the template file for nested template refs ─────

@@ -7,6 +7,37 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.4.6] - 2026-02-19
+
+### Added
+
+- **Encoding detection in `extractTemplateRefs`** — now reads files as raw bytes first,
+  detects UTF-16 LE/BE BOM and UTF-8 BOM, and logs the encoding. Also logs the first
+  20 bytes as hex for any file that contains no "template" word at all, to diagnose
+  whether files are being read with unexpected encoding on Windows.
+
+## [1.4.5] - 2026-02-19
+
+### Added
+
+- **Extended diagnostic logging** — added `[ATN DEBUG]` logs to `extractTemplateRefs`
+  to show raw line content (including CRLF detection) when a file contains "template"
+  text but the regex finds zero refs. Also added `hasCRLF` flag and regex-miss logging
+  to `getDiagnosticsForDocument`. These logs will reveal whether CRLF line endings
+  cause the template-ref regex to fail on Windows-authored YAML files.
+
+## [1.4.4] - 2026-02-19
+
+### Added
+
+- **Diagnostic logging for Windows path investigation** — added `[ATN DEBUG]` console
+  log statements to `hoverProvider.js`, `graphDataBuilder.js`, `treeViewProvider.js`,
+  and `diagnosticProvider.js` to capture path resolution details, nodeMap hit/miss
+  statistics, and template-children counts on Windows. These logs appear in the
+  VS Code Developer Tools console (Help → Toggle Developer Tools → Console) and are
+  used to diagnose why the tree view, graph, and diagnostics show fewer connections
+  than expected on Windows. Will be removed once the root cause is confirmed and fixed.
+
 ## [1.4.3] - 2026-02-19
 
 ### Fixed

@@ -16,6 +16,7 @@ let simulation = null;
 let filterText = '';
 let currentRootPath = '';   // tracks the active path filter
 let fileScopeEnabled = true; // mirrors _fileScopeEnabled on the extension side
+let scopedFilePath = null;   // the focal file when in file-scope mode
 
 // ---------------------------------------------------------------------------
 // Colour palette (matches legend in HTML)
@@ -284,6 +285,9 @@ window.addEventListener('message', (event) => {
         updatePathInputStyle();
       }
 
+      // Track the focal file for upstream/downstream colouring
+      scopedFilePath = msg.scopedFile || null;
+
       // Update stats label to show scope context
       renderGraph(msg.nodes, msg.edges, msg.scopedFile);
       break;
@@ -401,6 +405,17 @@ function applyHierarchicalPositions(nodes, layerMap, width, height) {
 // ---------------------------------------------------------------------------
 
 /**
+ * Returns the stroke colour for an edge based on its direction property.
+ * @param {object} e  edge datum
+ * @returns {string}
+ */
+function edgeColor(e) {
+  if (e.direction === 'upstream')   return '#e09a3d';  // amber — caller → focal
+  if (e.direction === 'downstream') return '#4e9de0';  // blue  — focal → callee
+  return '#666';                                        // grey  — workspace-wide
+}
+
+/**
  * @param {import('../graphWebViewProvider').GraphNode[]} nodes
  * @param {import('../graphWebViewProvider').GraphEdge[]} edges
  */
@@ -419,9 +434,16 @@ function renderGraph(nodes, edges, scopedFile) {
   allNodes = nodes.map(n => Object.assign({}, n));
   allEdges = edges.map(e => Object.assign({}, e));
 
+  // Count upstream / downstream edges for the stats bar
+  const upstreamCount   = allEdges.filter(e => e.direction === 'upstream').length;
+  const downstreamCount = allEdges.filter(e => e.direction === 'downstream').length;
+
   if (scopedFile) {
     const fname = scopedFile.replace(/\\/g, '/').split('/').pop();
-    statsEl.textContent = `📄 ${fname} · ${nodes.length} nodes · ${edges.length} refs`;
+    let statParts = [`📄 ${fname}`, `${nodes.length} nodes`];
+    if (downstreamCount > 0) statParts.push(`↓ ${downstreamCount} downstream`);
+    if (upstreamCount   > 0) statParts.push(`↑ ${upstreamCount} upstream`);
+    statsEl.textContent = statParts.join(' · ');
   } else {
     statsEl.textContent = `${nodes.length} files · ${edges.length} refs`;
   }
@@ -481,10 +503,11 @@ function renderGraph(nodes, edges, scopedFile) {
     .data(allEdges)
     .enter()
     .append('line')
-    .attr('stroke', '#666')
-    .attr('stroke-width', 1.5)
-    .attr('stroke-opacity', 0.6)
-    .attr('marker-end', 'url(#arrow)');
+    .attr('stroke', d => edgeColor(d))
+    .attr('stroke-width', d => (d.direction === 'upstream' || d.direction === 'downstream') ? 2 : 1.5)
+    .attr('stroke-opacity', d => (d.direction === 'upstream' || d.direction === 'downstream') ? 0.75 : 0.6)
+    .attr('stroke-dasharray', d => d.direction === 'upstream' ? '5,3' : null)
+    .attr('marker-end', d => d.direction === 'upstream' ? 'url(#arrow-upstream)' : 'url(#arrow)');
 
   // Edge labels (only for cross-repo edges that have a label)
   const edgeLabelSel = d3.select(edgeLabels)
@@ -493,7 +516,7 @@ function renderGraph(nodes, edges, scopedFile) {
     .enter()
     .append('text')
     .attr('font-size', 9)
-    .attr('fill', '#999')
+    .attr('fill', d => edgeColor(d))
     .attr('text-anchor', 'middle')
     .attr('dy', -3)
     .text(d => d.label);
@@ -512,6 +535,17 @@ function renderGraph(nodes, edges, scopedFile) {
         .on('drag',  dragged)
         .on('end',   dragEnded)
     );
+
+  // Focal-node outer ring (only in file-scope mode for the scoped file)
+  nodeGroup.filter(d => scopedFile && d.filePath === scopedFile)
+    .append('circle')
+    .attr('r', d => (KIND_RADIUS[d.kind] || 13) + 5)
+    .attr('fill', 'none')
+    .attr('stroke', 'var(--vscode-focusBorder, #007fd4)')
+    .attr('stroke-width', 2)
+    .attr('stroke-dasharray', '4,2')
+    .attr('opacity', 0.8)
+    .attr('pointer-events', 'none');
 
   // Circle
   nodeGroup.append('circle')
@@ -632,7 +666,7 @@ function highlightNeighbours(d, edgeSel, nodeGroup) {
     .attr('stroke-opacity', e => {
       const sid = typeof e.source === 'object' ? e.source.id : e.source;
       const tid = typeof e.target === 'object' ? e.target.id : e.target;
-      return (sid === d.id || tid === d.id) ? 1 : 0.08;
+      return (sid === d.id || tid === d.id) ? 1 : 0.05;
     })
     .attr('stroke-width', e => {
       const sid = typeof e.source === 'object' ? e.source.id : e.source;
@@ -640,13 +674,13 @@ function highlightNeighbours(d, edgeSel, nodeGroup) {
       return (sid === d.id || tid === d.id) ? 2.5 : 1.5;
     });
 
-  nodeGroup.style('opacity', n => connectedIds.has(n.id) ? 1 : 0.15);
+  nodeGroup.style('opacity', n => connectedIds.has(n.id) ? 1 : 0.12);
 }
 
 function resetHighlight(edgeSel, nodeGroup) {
   edgeSel
-    .attr('stroke-opacity', 0.6)
-    .attr('stroke-width', 1.5);
+    .attr('stroke-opacity', e => (e.direction === 'upstream' || e.direction === 'downstream') ? 0.75 : 0.6)
+    .attr('stroke-width',   e => (e.direction === 'upstream' || e.direction === 'downstream') ? 2 : 1.5);
   nodeGroup.style('opacity', 1);
 }
 
@@ -720,6 +754,25 @@ function showTooltip(event, d) {
   else if (d.kind === 'external') html += `<br><span style="color:#9b6fd4">🔗 External — @${d.repoName || ''}</span>`;
   else if (d.kind === 'missing')  html += `<br><span style="color:#e05c5c">⚠ File not found</span>`;
   else if (d.kind === 'unknown')  html += `<br><span style="color:#e09a3d">? Unknown alias @${d.alias || ''}</span>`;
+
+  // Show upstream / downstream role when in file-scope mode
+  if (scopedFilePath && d.filePath) {
+    if (d.filePath === scopedFilePath) {
+      html += `<br><span style="color:var(--vscode-focusBorder,#007fd4)">◎ Focal file</span>`;
+    } else {
+      // Determine role from edges
+      const isUpstream   = allEdges.some(e => {
+        const sid = typeof e.source === 'object' ? e.source.id : e.source;
+        return e.direction === 'upstream' && sid === d.filePath;
+      });
+      const isDownstream = allEdges.some(e => {
+        const tid = typeof e.target === 'object' ? e.target.id : e.target;
+        return e.direction === 'downstream' && tid === d.filePath;
+      });
+      if (isUpstream)   html += `<br><span style="color:#e09a3d">↑ Upstream caller</span>`;
+      if (isDownstream) html += `<br><span style="color:#4e9de0">↓ Downstream dependency</span>`;
+    }
+  }
 
   if (d.filePath) html += `<br><small style="opacity:0.7">${d.filePath}</small>`;
 
