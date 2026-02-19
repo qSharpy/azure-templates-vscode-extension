@@ -68,7 +68,10 @@ function validateCallSite(lines, templateLine, templateRef, currentFile, repoAli
 
   // Resolve the template file
   const resolved = resolveTemplatePath(templateRef, currentFile, repoAliases);
-  if (!resolved || resolved.unknownAlias || !resolved.filePath) return diagnostics;
+  if (!resolved || resolved.unknownAlias || !resolved.filePath) {
+    console.log(`[ATN DEBUG] diagnostics: resolveTemplatePath skipped for ref="${templateRef}" currentFile="${currentFile}" resolved=${JSON.stringify(resolved)}`);
+    return diagnostics;
+  }
 
   const { filePath } = resolved;
 
@@ -77,6 +80,7 @@ function validateCallSite(lines, templateLine, templateRef, currentFile, repoAli
   try {
     templateText = fs.readFileSync(filePath, 'utf8');
   } catch {
+    console.log(`[ATN DEBUG] diagnostics: readFileSync FAILED for filePath="${filePath}" ref="${templateRef}" currentFile="${currentFile}"`);
     return diagnostics; // file not found — hoverProvider already handles this
   }
 
@@ -176,6 +180,8 @@ function getDiagnosticsForDocument(document) {
   const lines = docText.split('\n');
   const currentFile = document.uri.fsPath;
   const repoAliases = parseRepositoryAliases(docText);
+
+  console.log(`[ATN DEBUG] getDiagnosticsForDocument: currentFile="${currentFile}" platform="${process.platform}" sep="${require('path').sep}"`);
 
   const allDiagnostics = [];
 

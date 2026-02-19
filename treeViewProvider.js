@@ -98,7 +98,10 @@ function getTemplateChildren(filePath, visited = new Set()) {
 
     const resolved = resolveTemplatePath(templateRef, filePath, repoAliases);
 
-    if (!resolved) continue;
+    if (!resolved) {
+      console.log(`[ATN DEBUG] treeView: resolveTemplatePath returned null for ref="${templateRef}" in file="${filePath}"`);
+      continue;
+    }
 
     if (resolved.unknownAlias) {
       children.push(new TemplateNode({
@@ -113,6 +116,7 @@ function getTemplateChildren(filePath, visited = new Set()) {
     const { filePath: resolvedPath, repoName } = resolved;
 
     if (!resolvedPath || !fs.existsSync(resolvedPath)) {
+      console.log(`[ATN DEBUG] treeView: template NOT FOUND: ref="${templateRef}" resolvedPath="${resolvedPath}" existsSync=${resolvedPath ? fs.existsSync(resolvedPath) : 'n/a'} parentFile="${filePath}"`);
       children.push(new TemplateNode({
         label: templateRef,
         templateRef,

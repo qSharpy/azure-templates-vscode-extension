@@ -436,10 +436,13 @@ function resolveTemplatePath(templateRef, currentFile, repoAliases) {
     const repoRoot = findRepoRoot(path.dirname(currentFile));
     const parentDir = path.dirname(repoRoot);
     const filePath = path.join(parentDir, repoName, templatePath.startsWith('/') ? templatePath.slice(1) : templatePath);
+    console.log(`[ATN DEBUG] resolveTemplatePath cross-repo: ref="${ref}" currentFile="${currentFile}" repoRoot="${repoRoot}" resolved="${filePath}"`);
     return { filePath, repoName, alias };
   }
 
-  return resolveLocalPath(ref, currentFile);
+  const result = resolveLocalPath(ref, currentFile);
+  console.log(`[ATN DEBUG] resolveTemplatePath local: ref="${ref}" currentFile="${currentFile}" resolved="${result && result.filePath}"`);
+  return result;
 }
 
 /**

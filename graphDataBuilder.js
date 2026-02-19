@@ -161,6 +161,7 @@ function buildWorkspaceGraph(workspaceRoot, subPath) {
   }
 
   // ── Pass 2: for each file, resolve its template references ───────────────
+  console.log(`[ATN DEBUG] buildWorkspaceGraph Pass2: nodeMap has ${nodeMap.size} nodes. Keys sample: ${[...nodeMap.keys()].slice(0,3).join(' | ')}`);
   for (const filePath of yamlFiles) {
     let text = '';
     try { text = fs.readFileSync(filePath, 'utf8'); } catch { continue; }
@@ -199,6 +200,7 @@ function buildWorkspaceGraph(workspaceRoot, subPath) {
 
         if (!fs.existsSync(resolvedPath)) {
           // Missing file node
+          console.log(`[ATN DEBUG] Pass2 MISSING: templateRef="${templateRef}" resolvedPath="${resolvedPath}" sourceFile="${filePath}"`);
           targetId = `MISSING:${resolvedPath}`;
           if (!nodeMap.has(targetId)) {
             nodeMap.set(targetId, {
@@ -215,7 +217,13 @@ function buildWorkspaceGraph(workspaceRoot, subPath) {
           targetId = resolvedPath;
 
           // Ensure the target node exists (may be outside workspace)
-          if (!nodeMap.has(targetId)) {
+          const nodeMapHit = nodeMap.has(targetId);
+          if (!nodeMapHit) {
+            console.log(`[ATN DEBUG] Pass2 nodeMap MISS: targetId="${targetId}" (not found in nodeMap). Source="${filePath}" ref="${templateRef}"`);
+            // Log a sample of nodeMap keys to check for separator/case differences
+            const keys = [...nodeMap.keys()];
+            const similar = keys.filter(k => k.toLowerCase().includes(path.basename(resolvedPath).toLowerCase()));
+            if (similar.length > 0) console.log(`[ATN DEBUG]   Similar keys in nodeMap: ${similar.join(' | ')}`);
             nodeMap.set(targetId, {
               id: targetId,
               label: path.basename(resolvedPath),
