@@ -20,6 +20,7 @@ class TemplateNode {
   /**
    * @param {object} opts
    * @param {string}      opts.label        Display label
+   * @param {string|null} opts.relativePath Workspace-relative path (e.g. "templates/build.yml")
    * @param {string|null} opts.filePath     Absolute path to the template file (null if unresolved)
    * @param {string|null} opts.templateRef  Raw template reference string (e.g. "templates/build.yml@alias")
    * @param {string|null} opts.repoName     External repo name, or null for local templates
@@ -37,6 +38,7 @@ class TemplateNode {
    */
   constructor({
     label,
+    relativePath = null,
     filePath = null,
     templateRef = null,
     repoName = null,
@@ -53,6 +55,7 @@ class TemplateNode {
     upstreamCallers = null,
   }) {
     this.label = label;
+    this.relativePath = relativePath;
     this.filePath = filePath;
     this.templateRef = templateRef;
     this.repoName = repoName;
@@ -114,6 +117,7 @@ function getUpstreamCallers(targetFilePath, workspaceRoot) {
 
     callers.push(new TemplateNode({
       label: path.basename(callerFile),
+      relativePath: path.relative(workspaceRoot, callerFile).replace(/\\/g, '/'),
       filePath: callerFile,
       isUpstreamCaller: true,
       paramCount,
@@ -130,11 +134,12 @@ function getUpstreamCallers(targetFilePath, workspaceRoot) {
  * Scans a YAML file for `- template:` references and returns an array of
  * TemplateNode objects representing each call site.
  *
- * @param {string}      filePath  Absolute path of the file to scan
- * @param {Set<string>} visited   Set of already-visited file paths (cycle guard)
+ * @param {string}      filePath       Absolute path of the file to scan
+ * @param {Set<string>} visited        Set of already-visited file paths (cycle guard)
+ * @param {string}      [workspaceRoot] Absolute path of the workspace root (for relativePath)
  * @returns {TemplateNode[]}
  */
-function getTemplateChildren(filePath, visited = new Set()) {
+function getTemplateChildren(filePath, visited = new Set(), workspaceRoot = null) {
   let text;
   try {
     text = fs.readFileSync(filePath, 'utf8');
@@ -202,6 +207,7 @@ function getTemplateChildren(filePath, visited = new Set()) {
       const shortName = path.basename(resolvedPath);
       children.push(new TemplateNode({
         label: repoName ? `${shortName} @${repoName}` : shortName,
+        relativePath: workspaceRoot ? path.relative(workspaceRoot, resolvedPath).replace(/\\/g, '/') : null,
         filePath: resolvedPath,
         templateRef,
         repoName,
@@ -233,6 +239,7 @@ function getTemplateChildren(filePath, visited = new Set()) {
 
     children.push(new TemplateNode({
       label,
+      relativePath: workspaceRoot ? path.relative(workspaceRoot, resolvedPath).replace(/\\/g, '/') : null,
       filePath: resolvedPath,
       templateRef,
       repoName,
@@ -258,6 +265,9 @@ class TemplateDependencyProvider {
 
     /** @type {string|null} Active document file path */
     this._activeFile = null;
+
+    /** @type {boolean} Whether to show workspace-relative paths instead of basenames */
+    this.showFullPath = false;
   }
 
   /**
@@ -266,6 +276,14 @@ class TemplateDependencyProvider {
    */
   refresh(filePath) {
     this._activeFile = filePath;
+    this._onDidChangeTreeData.fire(undefined);
+  }
+
+  /**
+   * Toggles the full-path display mode and refreshes the tree.
+   */
+  toggleFullPath() {
+    this.showFullPath = !this.showFullPath;
     this._onDidChangeTreeData.fire(undefined);
   }
 
@@ -299,7 +317,12 @@ class TemplateDependencyProvider {
         ? vscode.TreeItemCollapsibleState.Collapsed
         : vscode.TreeItemCollapsibleState.None;
 
-    const item = new vscode.TreeItem(node.label, collapsible);
+    // Compute display label: use workspace-relative path when showFullPath is on
+    const displayLabel = this.showFullPath && node.relativePath
+      ? node.relativePath
+      : node.label;
+
+    const item = new vscode.TreeItem(displayLabel, collapsible);
 
     // ── Icon ──────────────────────────────────────────────────────────────
     if (node.isCycle) {
@@ -425,6 +448,7 @@ class TemplateDependencyProvider {
       const fileName = path.basename(this._activeFile);
       const root = new TemplateNode({
         label: fileName,
+        relativePath: path.relative(workspaceRoot, this._activeFile).replace(/\\/g, '/'),
         filePath: this._activeFile,
         isRoot: true,
       });
@@ -434,8 +458,12 @@ class TemplateDependencyProvider {
 
     // ── Root node: show only downstream children ──────────────────────────
     if (node.isRoot && node.filePath) {
+      const workspaceFolders = require('vscode').workspace.workspaceFolders;
+      const workspaceRoot = workspaceFolders && workspaceFolders.length > 0
+        ? workspaceFolders[0].uri.fsPath
+        : path.dirname(node.filePath);
       const visited = new Set([node.filePath]);
-      return getTemplateChildren(node.filePath, visited);
+      return getTemplateChildren(node.filePath, visited, workspaceRoot);
     }
 
     // ── Upstream group: return the pre-computed caller nodes ──────────────
@@ -456,8 +484,12 @@ class TemplateDependencyProvider {
       // because getTemplateChildren seeds visited with the parent before
       // recursing, so direct parent→child cycles are caught. Deeper cycles
       // (A→B→C→A) are caught because each call passes its own visited copy.
+      const workspaceFolders = require('vscode').workspace.workspaceFolders;
+      const workspaceRoot = workspaceFolders && workspaceFolders.length > 0
+        ? workspaceFolders[0].uri.fsPath
+        : path.dirname(node.filePath);
       const visited = new Set([node.filePath]);
-      return getTemplateChildren(node.filePath, visited);
+      return getTemplateChildren(node.filePath, visited, workspaceRoot);
     }
 
     return [];
@@ -507,6 +539,20 @@ function createTreeViewProvider(context) {
     () => updateForEditor(vscode.window.activeTextEditor)
   );
   context.subscriptions.push(refreshCmd);
+
+  // ── Toggle full-path display ───────────────────────────────────────────
+  const toggleFullPathCmd = vscode.commands.registerCommand(
+    'azure-templates-navigator.toggleFullPathTree',
+    () => {
+      provider.toggleFullPath();
+      vscode.window.showInformationMessage(
+        provider.showFullPath
+          ? 'Template tree: showing full workspace-relative paths'
+          : 'Template tree: showing filenames only'
+      );
+    }
+  );
+  context.subscriptions.push(toggleFullPathCmd);
 
   // ── Context menu: Open to Side ────────────────────────────────────────
   const openBesideCmd = vscode.commands.registerCommand(

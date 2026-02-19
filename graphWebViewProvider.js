@@ -244,6 +244,7 @@ class TemplateGraphProvider {
           nodes,
           edges,
           rootPath: '',
+          workspaceRoot,
           fileScopeEnabled: true,
           scopedFile: this._activeFile,
         });
@@ -266,6 +267,7 @@ class TemplateGraphProvider {
         nodes,
         edges,
         rootPath: subPath,
+        workspaceRoot,
         fileScopeEnabled: false,
         scopedFile: null,
       });
@@ -387,16 +389,19 @@ class TemplateGraphProvider {
       cursor: not-allowed;
     }
 
-    #stats {
-      font-size: 10px;
-      color: var(--vscode-descriptionForeground);
-      white-space: nowrap;
-      margin-left: auto;  /* pushes stats + expand to the right */
+    /* Full-path toggle button — highlights when full paths are shown */
+    #btn-full-path.active {
+      background: var(--vscode-button-background);
+      color: var(--vscode-button-foreground);
     }
+    #btn-full-path.active:hover {
+      background: var(--vscode-button-hoverBackground);
+    }
+#btn-expand {
+  flex-shrink: 0;
+  margin-left: auto;  /* pushes expand button to the right */
+}
 
-    #btn-expand {
-      flex-shrink: 0;
-    }
 
     /* ── Toolbar row 2: filter (always visible, prominent) ───────────────── */
     #filter-bar {
@@ -523,6 +528,24 @@ class TemplateGraphProvider {
       color: var(--vscode-editor-foreground);
       background: var(--vscode-button-secondaryHoverBackground);
     }
+
+    /* Stats overlay — top-left of the graph canvas */
+    #stats {
+      position: absolute;
+      top: 8px;
+      left: 8px;
+      font-size: 10px;
+      color: var(--vscode-descriptionForeground);
+      white-space: nowrap;
+      pointer-events: none;
+      z-index: 10;
+      background: var(--vscode-sideBar-background);
+      border: 1px solid var(--vscode-panel-border);
+      border-radius: 3px;
+      padding: 2px 7px;
+      opacity: 0.85;
+    }
+    #stats:empty { display: none; }
 
     #graph-container {
       flex: 1;
@@ -651,7 +674,7 @@ class TemplateGraphProvider {
     <button id="btn-reset"   title="Reset node positions">⟳ Reset</button>
     <button id="btn-file-scope" title="Scope graph to the currently open file (shows parent + direct children only)" class="active">📄 File</button>
     <button id="btn-toggle-path" title="Set a sub-directory path to scope the graph">📁 Path<span class="path-dot"></span></button>
-    <span id="stats"></span>
+    <button id="btn-full-path" title="Toggle between filename and full workspace-relative path labels">⊞ Full Path</button>
     <button id="btn-expand" title="Open graph in full editor panel" style="${expandBtnStyle}">⤢ Expand</button>
   </div>
 
@@ -671,6 +694,7 @@ class TemplateGraphProvider {
   </div>
 
   <div id="graph-container">
+    <div id="stats"></div>
     <svg id="svg">
       <defs>
         <marker id="arrow" viewBox="0 -4 10 8" refX="20" refY="0"

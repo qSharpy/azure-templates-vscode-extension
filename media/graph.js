@@ -17,6 +17,8 @@ let filterText = '';
 let currentRootPath = '';   // tracks the active path filter
 let fileScopeEnabled = true; // mirrors _fileScopeEnabled on the extension side
 let scopedFilePath = null;   // the focal file when in file-scope mode
+let showFullPath = false;    // whether to show workspace-relative paths as node labels
+let workspaceRoot = '';      // workspace root path (for display only)
 
 // ---------------------------------------------------------------------------
 // Colour palette (matches legend in HTML)
@@ -62,6 +64,7 @@ const btnClearSearch = document.getElementById('btn-clear-search');
 const pathBar        = document.getElementById('path-bar');
 const btnTogglePath  = document.getElementById('btn-toggle-path');
 const btnFileScope   = document.getElementById('btn-file-scope');
+const btnFullPath    = document.getElementById('btn-full-path');
 const rootPathInput  = document.getElementById('root-path');
 const btnApplyPath   = document.getElementById('btn-apply-path');
 const btnClearPath   = document.getElementById('btn-clear-path');
@@ -128,6 +131,50 @@ btnFileScope.addEventListener('click', () => {
   updateFileScopeButton();
   vscode.postMessage({ type: 'setFileScope', enabled: fileScopeEnabled });
 });
+
+// ---------------------------------------------------------------------------
+// Full-path toggle button
+// ---------------------------------------------------------------------------
+
+/**
+ * Updates the visual state of the full-path button and re-renders node labels.
+ */
+function updateFullPathButton() {
+  if (showFullPath) {
+    btnFullPath.classList.add('active');
+    btnFullPath.title = 'Showing full workspace-relative paths — click to show filenames only';
+  } else {
+    btnFullPath.classList.remove('active');
+    btnFullPath.title = 'Toggle between filename and full workspace-relative path labels';
+  }
+}
+
+btnFullPath.addEventListener('click', () => {
+  showFullPath = !showFullPath;
+  updateFullPathButton();
+  // Re-render node labels in place without rebuilding the whole graph
+  updateNodeLabels();
+});
+
+/**
+ * Returns the display label for a node based on the current showFullPath setting.
+ * @param {object} d  node datum
+ * @returns {string}
+ */
+function nodeLabel(d) {
+  if (showFullPath && d.relativePath) {
+    return d.relativePath;
+  }
+  return d.label;
+}
+
+/**
+ * Updates only the text labels of existing nodes (no simulation restart needed).
+ */
+function updateNodeLabels() {
+  d3.select(nodesLayer).selectAll('g.node').select('text:last-of-type')
+    .text(d => truncate(nodeLabel(d), showFullPath ? 40 : 24));
+}
 
 searchInput.addEventListener('input', () => {
   filterText = searchInput.value.trim().toLowerCase();
@@ -290,6 +337,11 @@ window.addEventListener('message', (event) => {
         rootPathInput.value = msg.rootPath;
         currentRootPath = msg.rootPath;
         updatePathInputStyle();
+      }
+
+      // Store workspace root for full-path display
+      if (typeof msg.workspaceRoot === 'string') {
+        workspaceRoot = msg.workspaceRoot;
       }
 
       // Track the focal file for upstream/downstream colouring
@@ -578,7 +630,7 @@ function renderGraph(nodes, edges, scopedFile) {
     .attr('font-size', 10)
     .attr('fill', 'var(--vscode-editor-foreground)')
     .attr('pointer-events', 'none')
-    .text(d => truncate(d.label, 24));
+    .text(d => truncate(nodeLabel(d), showFullPath ? 40 : 24));
 
   // ── Interactions ──────────────────────────────────────────────────────────
   nodeGroup
@@ -704,6 +756,7 @@ function applyFilter() {
   const matchedIds = new Set(
     allNodes
       .filter(n => n.label.toLowerCase().includes(filterText) ||
+                   (n.relativePath && n.relativePath.toLowerCase().includes(filterText)) ||
                    (n.repoName && n.repoName.toLowerCase().includes(filterText)))
       .map(n => n.id)
   );

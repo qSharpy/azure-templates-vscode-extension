@@ -7,6 +7,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.5.0] - 2026-02-19
+
+### Added
+
+- **Full-path labels toggle — Template Graph** — a new **⊞ Full Path** button in the graph
+  toolbar lets you switch node labels between the short filename (e.g. `build-dotnet.yml`) and
+  the full workspace-relative path (e.g. `templates/build-dotnet.yml`). The button highlights
+  when active; labels update instantly without restarting the simulation. The filter box also
+  searches against the full relative path when this mode is on.
+
+- **Full-path labels toggle — Template Tree** — a new **$(symbol-file) Toggle Full Path Labels**
+  icon button in the Template Dependencies view title bar (also available via the Command Palette
+  as `Azure Templates Navigator: Toggle Full Path Labels`) switches all tree node labels between
+  filename-only and workspace-relative path. A toast notification confirms the current mode.
+
+- **Graph stats moved into the canvas** — the scope summary line
+  (`📄 azure-pipelines.yml · 7 nodes · ↓ 6 downstream`) is now displayed as a floating
+  overlay in the **top-left corner of the graph canvas** instead of in the toolbar, freeing
+  up toolbar space and keeping the information visible at all times while interacting with
+  the graph.
+
 ## [1.4.9] - 2026-02-19
 
 ### Fixed

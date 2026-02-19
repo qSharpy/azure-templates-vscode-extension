@@ -154,6 +154,7 @@ function buildWorkspaceGraph(workspaceRoot, subPath) {
     nodeMap.set(filePath, {
       id: filePath,
       label: path.basename(filePath),
+      relativePath: path.relative(workspaceRoot, filePath).replace(/\\/g, '/'),
       kind,
       filePath,
       paramCount: 0,
@@ -220,6 +221,7 @@ function buildWorkspaceGraph(workspaceRoot, subPath) {
             nodeMap.set(targetId, {
               id: targetId,
               label: path.basename(resolvedPath),
+              relativePath: path.relative(workspaceRoot, resolvedPath).replace(/\\/g, '/'),
               kind: repoName ? 'external' : 'local',
               filePath: resolvedPath,
               repoName,
@@ -285,8 +287,9 @@ function buildWorkspaceGraph(workspaceRoot, subPath) {
  * @param {GraphEdge[]}         edges
  * @param {Set<string>}         edgeKeys
  * @param {'downstream'|'upstream'} direction
+ * @param {string}              workspaceRoot  Absolute path to the workspace root
  */
-function _addResolvedRef(sourceId, templateRef, callerFile, resolved, nodeMap, edges, edgeKeys, direction) {
+function _addResolvedRef(sourceId, templateRef, callerFile, resolved, nodeMap, edges, edgeKeys, direction, workspaceRoot) {
   let targetId;
   let edgeLabel;
 
@@ -313,6 +316,7 @@ function _addResolvedRef(sourceId, templateRef, callerFile, resolved, nodeMap, e
         nodeMap.set(targetId, {
           id: targetId,
           label: path.basename(resolvedPath),
+          relativePath: workspaceRoot ? path.relative(workspaceRoot, resolvedPath).replace(/\\/g, '/') : path.basename(resolvedPath),
           kind: 'missing',
           filePath: resolvedPath,
           repoName,
@@ -335,6 +339,7 @@ function _addResolvedRef(sourceId, templateRef, callerFile, resolved, nodeMap, e
         nodeMap.set(targetId, {
           id: targetId,
           label: path.basename(resolvedPath),
+          relativePath: workspaceRoot ? path.relative(workspaceRoot, resolvedPath).replace(/\\/g, '/') : path.basename(resolvedPath),
           kind: repoName ? 'external' : 'local',
           filePath: resolvedPath,
           repoName,
@@ -397,6 +402,7 @@ function buildFileGraph(filePath, workspaceRoot) {
   nodeMap.set(filePath, {
     id: filePath,
     label: path.basename(filePath),
+    relativePath: path.relative(workspaceRoot, filePath).replace(/\\/g, '/'),
     kind: rootKind,
     filePath,
     paramCount: rootParams.length,
@@ -412,7 +418,7 @@ function buildFileGraph(filePath, workspaceRoot) {
     if (/\$\{/.test(templateRef) || /\$\(/.test(templateRef)) continue;
     const resolved = resolveTemplatePath(templateRef, filePath, repoAliases);
     if (!resolved) continue;
-    _addResolvedRef(filePath, templateRef, filePath, resolved, nodeMap, edges, edgeKeys, 'downstream');
+    _addResolvedRef(filePath, templateRef, filePath, resolved, nodeMap, edges, edgeKeys, 'downstream', workspaceRoot);
   }
 
   // ── Upstream: find all workspace YAML files that reference this file ───────
@@ -449,6 +455,7 @@ function buildFileGraph(filePath, workspaceRoot) {
         nodeMap.set(callerFile, {
           id: callerFile,
           label: path.basename(callerFile),
+          relativePath: path.relative(workspaceRoot, callerFile).replace(/\\/g, '/'),
           kind: callerKind,
           filePath: callerFile,
           paramCount: callerParamCount,
