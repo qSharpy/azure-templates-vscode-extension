@@ -111,7 +111,6 @@ stages:
                 # Notify on completion
                 - template: templates/notify-teams.yml
                   parameters:
-                    webhookUrl: 'https://teams.webhook.url'
                     #message: 'Deployment to Production complete!'
                     environment: 'Production'
                     includeRunLink: asd

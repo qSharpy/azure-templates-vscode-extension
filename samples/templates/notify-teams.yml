@@ -2,6 +2,8 @@ parameters:
   # REQUIRED
   - name: webhookUrl
     type: string
+    default: 'https://teams.webhook.url'
+  
   # REQUIRED
   - name: message
     type: string

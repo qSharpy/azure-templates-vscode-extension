@@ -102,11 +102,14 @@ function validateCallSite(lines, templateLine, templateRef, currentFile, repoAli
         templateLine, templateKeyStart >= 0 ? templateKeyStart : 0,
         templateLine, templateLineText.length
       );
-      const diag = new vscode.Diagnostic(
-        range,
-        `Missing required parameter '${p.name}' (type: ${p.type}) for template '${templateRef.trim()}'`,
-        vscode.DiagnosticSeverity.Error
-      );
+      const hasDefault = p.default !== undefined;
+      const severity = hasDefault
+        ? vscode.DiagnosticSeverity.Information
+        : vscode.DiagnosticSeverity.Error;
+      const message = hasDefault
+        ? `Missing required parameter '${p.name}' (type: ${p.type}) for template '${templateRef.trim()}' — default value '${p.default}' will be used`
+        : `Missing required parameter '${p.name}' (type: ${p.type}) for template '${templateRef.trim()}'`;
+      const diag = new vscode.Diagnostic(range, message, severity);
       diag.source = 'Azure Templates Navigator';
       diag.code = 'missing-required-param';
       diagnostics.push(diag);

@@ -193,6 +193,63 @@ describe('validateCallSite', () => {
     assert.strictEqual(missing[0].severity, 0); // DiagnosticSeverity.Error
   });
 
+  it('emits an Information diagnostic for a missing required parameter that has a default', () => {
+    // local-template.yml has "region" with default: eastus (not REQUIRED),
+    // so we use validateCallSite directly with inline lines/template content
+    // by pointing to a fixture where a param is both REQUIRED and has a default.
+    // We simulate this by calling validateCallSite with a mock that returns
+    // a declared param that is required AND has a default.
+    // Instead, we test via getDiagnosticsForDocument with an inline template
+    // written to a temp path — but since we can't write files in unit tests,
+    // we test the logic directly via validateCallSite by monkey-patching.
+    //
+    // The simplest approach: add a fixture template with a REQUIRED param that
+    // also has a default, then reference it.
+    //
+    // For now, verify the severity branching by inspecting the code path:
+    // We call validateCallSite with lines referencing local-template.yml but
+    // override the declared params by testing the condition directly.
+    //
+    // Actually the cleanest test: use the real validateCallSite but with a
+    // template that has # REQUIRED + default. We'll create that fixture inline.
+    const { validateCallSite: vc } = require('../../diagnosticProvider');
+
+    // Temporarily override fs.readFileSync for this test
+    const fs = require('fs');
+    const origRead = fs.readFileSync;
+    fs.readFileSync = (p, enc) => {
+      if (typeof p === 'string' && p.includes('required-with-default')) {
+        return [
+          'parameters:',
+          '  # REQUIRED',
+          '  - name: feedType',
+          '    type: string',
+          "    default: 'project'",
+        ].join('\n');
+      }
+      return origRead(p, enc);
+    };
+
+    const lines = [
+      '- template: ../templates/required-with-default.yml',
+      '  parameters:',
+      '    someOtherParam: value',
+    ];
+
+    let diags;
+    try {
+      diags = vc(lines, 0, '../templates/required-with-default.yml', CURRENT_FILE, {});
+    } finally {
+      fs.readFileSync = origRead;
+    }
+
+    const missing = diags.filter(d => d.code === 'missing-required-param');
+    assert.ok(missing.length >= 1, 'Expected a missing-required-param diagnostic');
+    assert.ok(missing[0].message.includes('feedType'));
+    assert.ok(missing[0].message.includes("'project'"), 'Expected default value in message');
+    assert.strictEqual(missing[0].severity, 2, 'Expected DiagnosticSeverity.Information (2)');
+  });
+
   it('emits a Warning diagnostic for an unknown parameter', () => {
     const lines = [
       '- template: ../templates/local-template.yml',
