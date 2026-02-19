@@ -135,16 +135,15 @@ function getUpstreamCallers(targetFilePath, workspaceRoot) {
  * @returns {TemplateNode[]}
  */
 function getTemplateChildren(filePath, visited = new Set()) {
-  console.log(`[ATN DEBUG] getTemplateChildren called: filePath="${filePath}"`);
   let text;
   try {
     text = fs.readFileSync(filePath, 'utf8');
   } catch {
-    console.log(`[ATN DEBUG] getTemplateChildren: readFileSync FAILED for "${filePath}"`);
     return [];
   }
 
-  const lines = text.split('\n');
+  // Normalize CRLF → LF so that regex $ anchors work on Windows-authored files
+  const lines = text.replace(/\r\n/g, '\n').split('\n');
   const repoAliases = parseRepositoryAliases(text);
   const children = [];
   let templateLinesFound = 0;
@@ -172,7 +171,6 @@ function getTemplateChildren(filePath, visited = new Set()) {
     const resolved = resolveTemplatePath(templateRef, filePath, repoAliases);
 
     if (!resolved) {
-      console.log(`[ATN DEBUG] treeView: resolveTemplatePath returned null for ref="${templateRef}" in file="${filePath}"`);
       continue;
     }
 
@@ -189,7 +187,6 @@ function getTemplateChildren(filePath, visited = new Set()) {
     const { filePath: resolvedPath, repoName } = resolved;
 
     if (!resolvedPath || !fs.existsSync(resolvedPath)) {
-      console.log(`[ATN DEBUG] treeView: template NOT FOUND: ref="${templateRef}" resolvedPath="${resolvedPath}" existsSync=${resolvedPath ? fs.existsSync(resolvedPath) : 'n/a'} parentFile="${filePath}"`);
       children.push(new TemplateNode({
         label: templateRef,
         templateRef,
@@ -225,7 +222,7 @@ function getTemplateChildren(filePath, visited = new Set()) {
       requiredCount = params.filter(p => p.required).length;
       // Quick scan: does this file contain any `template:` references?
       const templateLineRe = /(?:^|\s)-?\s*template\s*:\s*(.+)$/;
-      hasChildren = tplText.split('\n').some(l => templateLineRe.test(l.replace(/(^\s*#.*|\s#.*)$/, '')));
+      hasChildren = tplText.replace(/\r\n/g, '\n').split('\n').some(l => templateLineRe.test(l.replace(/(^\s*#.*|\s#.*)$/, '')));
     } catch {
       // ignore
     }
@@ -245,7 +242,6 @@ function getTemplateChildren(filePath, visited = new Set()) {
     }));
   }
 
-  console.log(`[ATN DEBUG] getTemplateChildren RESULT: filePath="${filePath}" templateLinesFound=${templateLinesFound} childrenReturned=${children.length} (found=${children.filter(c=>!c.notFound&&!c.unknownAlias).length} notFound=${children.filter(c=>c.notFound).length})`);
   return children;
 }
 

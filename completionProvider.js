@@ -114,7 +114,8 @@ const completionProvider = {
    */
   provideCompletionItems(document, position) {
     const docText = document.getText();
-    const lines = docText.split('\n');
+    // Normalize CRLF → LF so that regex $ anchors work on Windows-authored files
+    const lines = docText.replace(/\r\n/g, '\n').split('\n');
     const cursorLine = position.line;
 
     // ── Step 1: Find the enclosing template: line ─────────────────────────

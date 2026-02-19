@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.4.9] - 2026-02-19
+
+### Fixed
+
+- **Windows: diagnostics, tree view, and template graph now work correctly** — files
+  with CRLF line endings (the default on Windows) caused regex `$` anchors to fail
+  when matching `template:` lines, because `text.split('\n')` left a trailing `\r`
+  on every line. This broke diagnostics (no missing-parameter warnings), the Template
+  Dependencies tree view (showed no children), and the Template Graph (showed almost
+  no connections). All text-splitting code paths now normalize CRLF → LF before
+  splitting, fixing all three features on Windows.
+
+- **Removed leftover debug logging** — all `[ATN DEBUG]` console.log statements added
+  during investigation have been removed.
+
 ## [1.4.8] - 2026-02-19
 
 ### Changed

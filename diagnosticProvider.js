@@ -69,7 +69,6 @@ function validateCallSite(lines, templateLine, templateRef, currentFile, repoAli
   // Resolve the template file
   const resolved = resolveTemplatePath(templateRef, currentFile, repoAliases);
   if (!resolved || resolved.unknownAlias || !resolved.filePath) {
-    console.log(`[ATN DEBUG] diagnostics: resolveTemplatePath skipped for ref="${templateRef}" currentFile="${currentFile}" resolved=${JSON.stringify(resolved)}`);
     return diagnostics;
   }
 
@@ -80,7 +79,6 @@ function validateCallSite(lines, templateLine, templateRef, currentFile, repoAli
   try {
     templateText = fs.readFileSync(filePath, 'utf8');
   } catch {
-    console.log(`[ATN DEBUG] diagnostics: readFileSync FAILED for filePath="${filePath}" ref="${templateRef}" currentFile="${currentFile}"`);
     return diagnostics; // file not found — hoverProvider already handles this
   }
 
@@ -179,15 +177,12 @@ function validateCallSite(lines, templateLine, templateRef, currentFile, repoAli
  */
 function getDiagnosticsForDocument(document) {
   const docText = document.getText();
-  const hasCRLF = docText.includes('\r\n');
-  const lines = docText.split('\n');
+  // Normalize CRLF → LF so that regex $ anchors work on Windows-authored files
+  const lines = docText.replace(/\r\n/g, '\n').split('\n');
   const currentFile = document.uri.fsPath;
   const repoAliases = parseRepositoryAliases(docText);
 
-  console.log(`[ATN DEBUG] getDiagnosticsForDocument: currentFile="${currentFile}" platform="${process.platform}" sep="${require('path').sep}" hasCRLF=${hasCRLF}`);
-
   const allDiagnostics = [];
-  let templateLinesFound = 0;
 
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i];
@@ -195,14 +190,7 @@ function getDiagnosticsForDocument(document) {
     // lines like:  # ── Step template: build the .NET project ──
     const stripped = line.replace(/(^\s*#.*|\s#.*)$/, '');
     const match = /(?:^|\s)-?\s*template\s*:\s*(.+)$/.exec(stripped);
-    if (!match) {
-      // Log lines that contain "template:" but don't match the regex (first 3 only)
-      if (templateLinesFound === 0 && /template\s*:/i.test(stripped)) {
-        console.log(`[ATN DEBUG] getDiagnosticsForDocument REGEX MISS: file="${currentFile}" L${i} raw=${JSON.stringify(line)} stripped=${JSON.stringify(stripped)}`);
-      }
-      continue;
-    }
-    templateLinesFound++;
+    if (!match) continue;
 
     const templateRef = match[1].trim();
     // Skip template expressions with variables — can't resolve at edit time

@@ -23,7 +23,8 @@ const vscode = require('vscode');
  * @returns {{ name: string, type: string, default: string|undefined, required: boolean }[]}
  */
 function parseParameters(text) {
-  const lines = text.split('\n');
+  // Normalize CRLF → LF so that regex $ anchors work on Windows-authored files
+  const lines = text.replace(/\r\n/g, '\n').split('\n');
   const params = [];
 
   // Find the "parameters:" block
@@ -120,7 +121,8 @@ function parseParameters(text) {
  * @returns {Record<string, string>}  alias → repo folder name
  */
 function parseRepositoryAliases(text) {
-  const lines = text.split('\n');
+  // Normalize CRLF → LF so that regex $ anchors work on Windows-authored files
+  const lines = text.replace(/\r\n/g, '\n').split('\n');
   const aliases = {};
 
   let inResources = false;
@@ -222,7 +224,8 @@ function parseRepositoryAliases(text) {
  * }}
  */
 function parseVariables(text) {
-  const lines = text.split('\n');
+  // Normalize CRLF → LF so that regex $ anchors work on Windows-authored files
+  const lines = text.replace(/\r\n/g, '\n').split('\n');
   const variables = {};
   const groups = [];
 
@@ -433,12 +436,10 @@ function resolveTemplatePath(templateRef, currentFile, repoAliases) {
     const repoRoot = findRepoRoot(path.dirname(currentFile));
     const parentDir = path.dirname(repoRoot);
     const filePath = path.join(parentDir, repoName, templatePath.startsWith('/') ? templatePath.slice(1) : templatePath);
-    console.log(`[ATN DEBUG] resolveTemplatePath cross-repo: ref="${ref}" currentFile="${currentFile}" repoRoot="${repoRoot}" resolved="${filePath}"`);
     return { filePath, repoName, alias };
   }
 
   const result = resolveLocalPath(ref, currentFile);
-  console.log(`[ATN DEBUG] resolveTemplatePath local: ref="${ref}" currentFile="${currentFile}" resolved="${result && result.filePath}"`);
   return result;
 }
 

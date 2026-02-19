@@ -77,53 +77,21 @@ function isPipelineRoot(text) {
  * @returns {{ templateRef: string, line: number }[]}
  */
 function extractTemplateRefs(filePath) {
-  let rawBuffer;
   let text;
   try {
-    rawBuffer = fs.readFileSync(filePath);
-    // Detect UTF-16 BOM: FF FE (LE) or FE FF (BE)
-    const isUtf16LE = rawBuffer[0] === 0xFF && rawBuffer[1] === 0xFE;
-    const isUtf16BE = rawBuffer[0] === 0xFE && rawBuffer[1] === 0xFF;
-    const hasUtf8BOM = rawBuffer[0] === 0xEF && rawBuffer[1] === 0xBB && rawBuffer[2] === 0xBF;
-    if (isUtf16LE || isUtf16BE) {
-      console.log(`[ATN DEBUG] extractTemplateRefs ENCODING: file="${filePath}" encoding=${isUtf16LE ? 'UTF-16LE' : 'UTF-16BE'} — reading as utf16le`);
-      text = rawBuffer.toString('utf16le');
-      // Strip BOM character if present
-      if (text.charCodeAt(0) === 0xFEFF) text = text.slice(1);
-    } else {
-      text = rawBuffer.toString('utf8');
-      if (hasUtf8BOM) {
-        console.log(`[ATN DEBUG] extractTemplateRefs ENCODING: file="${filePath}" has UTF-8 BOM`);
-        text = text.slice(1); // remove BOM char
-      }
-    }
+    text = fs.readFileSync(filePath, 'utf8');
   } catch {
     return [];
   }
   const refs = [];
-  const hasCRLF = text.includes('\r\n');
-  const lines = text.split('\n');
+  // Normalize CRLF → LF so that regex $ anchors work on Windows-authored files
+  const lines = text.replace(/\r\n/g, '\n').split('\n');
   for (let i = 0; i < lines.length; i++) {
     // Strip YAML line comments before matching to avoid false positives from
     // lines like:  # ── Step template: build the .NET project ──
     const stripped = lines[i].replace(/(^\s*#.*|\s#.*)$/, '');
     const m = /(?:^|\s)-?\s*template\s*:\s*(.+)$/.exec(stripped);
     if (m) refs.push({ templateRef: m[1].trim(), line: i });
-  }
-  // If the file has "template" text but we found zero refs, log the raw lines to diagnose
-  const hasTemplateLine = lines.some(l => /template/i.test(l));
-  if (hasTemplateLine && refs.length === 0) {
-    const sampleLines = lines
-      .map((l, i) => ({ i, raw: l }))
-      .filter(({ raw }) => /template/i.test(raw))
-      .slice(0, 3)
-      .map(({ i, raw }) => `L${i}:${JSON.stringify(raw)}`);
-    console.log(`[ATN DEBUG] extractTemplateRefs ZERO REFS: file="${filePath}" hasCRLF=${hasCRLF} sampleLines=[${sampleLines.join(', ')}]`);
-  } else if (refs.length === 0 && rawBuffer.length > 0) {
-    // Log first 20 bytes as hex to detect unexpected encoding
-    const hexDump = Array.from(rawBuffer.slice(0, 20)).map(b => b.toString(16).padStart(2,'0')).join(' ');
-    const firstLine = lines[0] ? JSON.stringify(lines[0].slice(0, 80)) : '(empty)';
-    console.log(`[ATN DEBUG] extractTemplateRefs NO TEMPLATE WORD: file="${filePath}" hasCRLF=${hasCRLF} firstBytes=[${hexDump}] firstLine=${firstLine}`);
   }
   return refs;
 }
@@ -194,8 +162,6 @@ function buildWorkspaceGraph(workspaceRoot, subPath) {
   }
 
   // ── Pass 2: for each file, resolve its template references ───────────────
-  console.log(`[ATN DEBUG] buildWorkspaceGraph Pass2: nodeMap has ${nodeMap.size} nodes. Keys sample: ${[...nodeMap.keys()].slice(0,3).join(' | ')}`);
-  let totalRefs = 0, skippedVar = 0, nullResolved = 0, missingFile = 0, edgesAdded = 0;
   for (const filePath of yamlFiles) {
     let text = '';
     try { text = fs.readFileSync(filePath, 'utf8'); } catch { continue; }
@@ -204,12 +170,11 @@ function buildWorkspaceGraph(workspaceRoot, subPath) {
     const refs = extractTemplateRefs(filePath);
 
     for (const { templateRef } of refs) {
-      totalRefs++;
       // Skip variable expressions
-      if (/\$\{/.test(templateRef) || /\$\(/.test(templateRef)) { skippedVar++; continue; }
+      if (/\$\{/.test(templateRef) || /\$\(/.test(templateRef)) continue;
 
       const resolved = resolveTemplatePath(templateRef, filePath, repoAliases);
-      if (!resolved) { nullResolved++; continue; }
+      if (!resolved) continue;
 
       let targetId;
       let edgeLabel;
@@ -234,9 +199,7 @@ function buildWorkspaceGraph(workspaceRoot, subPath) {
         if (!resolvedPath) continue;
 
         if (!fs.existsSync(resolvedPath)) {
-          missingFile++;
           // Missing file node
-          console.log(`[ATN DEBUG] Pass2 MISSING: templateRef="${templateRef}" resolvedPath="${resolvedPath}" sourceFile="${filePath}"`);
           targetId = `MISSING:${resolvedPath}`;
           if (!nodeMap.has(targetId)) {
             nodeMap.set(targetId, {
@@ -253,13 +216,7 @@ function buildWorkspaceGraph(workspaceRoot, subPath) {
           targetId = resolvedPath;
 
           // Ensure the target node exists (may be outside workspace)
-          const nodeMapHit = nodeMap.has(targetId);
-          if (!nodeMapHit) {
-            console.log(`[ATN DEBUG] Pass2 nodeMap MISS: targetId="${targetId}" (not found in nodeMap). Source="${filePath}" ref="${templateRef}"`);
-            // Log a sample of nodeMap keys to check for separator/case differences
-            const keys = [...nodeMap.keys()];
-            const similar = keys.filter(k => k.toLowerCase().includes(path.basename(resolvedPath).toLowerCase()));
-            if (similar.length > 0) console.log(`[ATN DEBUG]   Similar keys in nodeMap: ${similar.join(' | ')}`);
+          if (!nodeMap.has(targetId)) {
             nodeMap.set(targetId, {
               id: targetId,
               label: path.basename(resolvedPath),
@@ -288,15 +245,12 @@ function buildWorkspaceGraph(workspaceRoot, subPath) {
       const edgeKey = `${filePath}→${targetId}`;
       if (!edgeKeys.has(edgeKey)) {
         edgeKeys.add(edgeKey);
-        edgesAdded++;
         const edge = { source: filePath, target: targetId };
         if (edgeLabel) edge.label = edgeLabel;
         edges.push(edge);
       }
     }
   }
-  console.log(`[ATN DEBUG] buildWorkspaceGraph Pass2 SUMMARY: totalRefs=${totalRefs} skippedVar=${skippedVar} nullResolved=${nullResolved} missingFile=${missingFile} edgesAdded=${edgesAdded} finalEdges=${edges.length}`);
-
   // ── Pass 3: fill in paramCount for all resolvable nodes ──────────────────
   for (const [, node] of nodeMap) {
     if (node.filePath && node.kind !== 'missing') {
