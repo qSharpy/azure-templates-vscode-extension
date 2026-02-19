@@ -46,19 +46,22 @@ const KIND_STROKE = {
 // ---------------------------------------------------------------------------
 // DOM refs
 // ---------------------------------------------------------------------------
-const svgEl        = document.getElementById('svg');
-const zoomLayer    = document.getElementById('zoom-layer');
-const edgesLayer   = document.getElementById('edges-layer');
-const edgeLabels   = document.getElementById('edge-labels-layer');
-const nodesLayer   = document.getElementById('nodes-layer');
-const tooltip      = document.getElementById('tooltip');
-const ctxMenu      = document.getElementById('ctx-menu');
-const emptyState   = document.getElementById('empty-state');
-const statsEl      = document.getElementById('stats');
-const searchInput  = document.getElementById('search');
-const rootPathInput = document.getElementById('root-path');
-const btnApplyPath  = document.getElementById('btn-apply-path');
-const btnClearPath  = document.getElementById('btn-clear-path');
+const svgEl          = document.getElementById('svg');
+const zoomLayer      = document.getElementById('zoom-layer');
+const edgesLayer     = document.getElementById('edges-layer');
+const edgeLabels     = document.getElementById('edge-labels-layer');
+const nodesLayer     = document.getElementById('nodes-layer');
+const tooltip        = document.getElementById('tooltip');
+const ctxMenu        = document.getElementById('ctx-menu');
+const emptyState     = document.getElementById('empty-state');
+const statsEl        = document.getElementById('stats');
+const searchInput    = document.getElementById('search');
+const btnClearSearch = document.getElementById('btn-clear-search');
+const pathBar        = document.getElementById('path-bar');
+const btnTogglePath  = document.getElementById('btn-toggle-path');
+const rootPathInput  = document.getElementById('root-path');
+const btnApplyPath   = document.getElementById('btn-apply-path');
+const btnClearPath   = document.getElementById('btn-clear-path');
 
 const svg = d3.select(svgEl);
 
@@ -95,7 +98,28 @@ document.getElementById('btn-expand').addEventListener('click', () => {
 
 searchInput.addEventListener('input', () => {
   filterText = searchInput.value.trim().toLowerCase();
+  btnClearSearch.classList.toggle('visible', filterText.length > 0);
   applyFilter();
+});
+
+btnClearSearch.addEventListener('click', () => {
+  searchInput.value = '';
+  filterText = '';
+  btnClearSearch.classList.remove('visible');
+  applyFilter();
+  searchInput.focus();
+});
+
+// ---------------------------------------------------------------------------
+// Path toggle button
+// ---------------------------------------------------------------------------
+
+btnTogglePath.addEventListener('click', () => {
+  const isOpen = pathBar.classList.toggle('open');
+  btnTogglePath.classList.toggle('active', isOpen);
+  if (isOpen) {
+    rootPathInput.focus();
+  }
 });
 
 // ---------------------------------------------------------------------------
@@ -117,25 +141,40 @@ function applyRootPath(newPath) {
 function updatePathInputStyle() {
   if (currentRootPath) {
     rootPathInput.classList.add('has-value');
+    btnTogglePath.classList.add('has-path');
   } else {
     rootPathInput.classList.remove('has-value');
+    btnTogglePath.classList.remove('has-path');
   }
 }
 
 btnApplyPath.addEventListener('click', () => {
   applyRootPath(rootPathInput.value);
+  // Collapse the path bar after applying
+  pathBar.classList.remove('open');
+  btnTogglePath.classList.remove('active');
 });
 
 // Apply on Enter key inside the path input
 rootPathInput.addEventListener('keydown', (e) => {
   if (e.key === 'Enter') {
     applyRootPath(rootPathInput.value);
+    // Collapse the path bar after applying
+    pathBar.classList.remove('open');
+    btnTogglePath.classList.remove('active');
+  }
+  if (e.key === 'Escape') {
+    pathBar.classList.remove('open');
+    btnTogglePath.classList.remove('active');
   }
 });
 
 btnClearPath.addEventListener('click', () => {
   rootPathInput.value = '';
   applyRootPath('');
+  // Collapse the path bar after clearing
+  pathBar.classList.remove('open');
+  btnTogglePath.classList.remove('active');
 });
 
 // ---------------------------------------------------------------------------

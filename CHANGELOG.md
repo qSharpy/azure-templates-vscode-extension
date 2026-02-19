@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.4.1] - 2026-02-19
+
+### Changed
+
+- **Template Graph: Filter nodes redesigned** — the filter input now occupies its own
+  full-width dedicated row (always visible) with a larger font, focus highlight, and a
+  one-click `✕` clear button that appears as soon as text is typed. Placeholder text
+  updated to `Filter by filename or @alias…` to clarify that cross-repo alias names are
+  also searchable.
+
+- **Template Graph: Path scoping moved to a collapsible panel** — the `📁 Path` sub-directory
+  filter is now a toggle button in the toolbar instead of a permanently visible second row.
+  Clicking `📁 Path` opens a compact input bar beneath the filter row; pressing `Enter`,
+  `Escape`, Apply, or the clear `✕` collapses it again. A small blue dot on the button
+  indicates when a path scope is actively applied, even while the bar is hidden.
+
 ## [1.4.0] - 2026-02-18
 
 ### Added

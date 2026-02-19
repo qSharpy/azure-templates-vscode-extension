@@ -253,15 +253,15 @@ class TemplateGraphProvider {
       flex-direction: column;
     }
 
+    /* ── Toolbar row 1: action buttons ──────────────────────────────────── */
     #toolbar {
       display: flex;
       align-items: center;
-      gap: 6px;
+      gap: 4px;
       padding: 4px 8px;
       background: var(--vscode-sideBar-background);
       border-bottom: 1px solid var(--vscode-panel-border);
       flex-shrink: 0;
-      flex-wrap: wrap;
     }
 
     #toolbar button {
@@ -269,41 +269,118 @@ class TemplateGraphProvider {
       color: var(--vscode-button-secondaryForeground);
       border: none;
       border-radius: 3px;
-      padding: 2px 8px;
+      padding: 2px 7px;
       cursor: pointer;
       font-size: 11px;
       white-space: nowrap;
+      flex-shrink: 0;
     }
     #toolbar button:hover {
       background: var(--vscode-button-secondaryHoverBackground);
     }
 
+    /* Path toggle button — highlights when a path is active */
+    #btn-toggle-path {
+      position: relative;
+    }
+    #btn-toggle-path.active {
+      background: var(--vscode-button-background);
+      color: var(--vscode-button-foreground);
+    }
+    #btn-toggle-path.active:hover {
+      background: var(--vscode-button-hoverBackground);
+    }
+    /* Small dot indicator when path is set */
+    #btn-toggle-path .path-dot {
+      display: none;
+      position: absolute;
+      top: 2px;
+      right: 2px;
+      width: 5px;
+      height: 5px;
+      border-radius: 50%;
+      background: var(--vscode-notificationsInfoIcon-foreground, #4e9de0);
+    }
+    #btn-toggle-path.has-path .path-dot {
+      display: block;
+    }
+
+    #stats {
+      font-size: 10px;
+      color: var(--vscode-descriptionForeground);
+      white-space: nowrap;
+      margin-left: auto;  /* pushes stats + expand to the right */
+    }
+
     #btn-expand {
-      margin-left: auto;
-      ${expandBtnStyle}
+      flex-shrink: 0;
+    }
+
+    /* ── Toolbar row 2: filter (always visible, prominent) ───────────────── */
+    #filter-bar {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      padding: 4px 8px;
+      background: var(--vscode-sideBar-background);
+      border-bottom: 1px solid var(--vscode-panel-border);
+      flex-shrink: 0;
+    }
+
+    #filter-bar label {
+      font-size: 11px;
+      color: var(--vscode-descriptionForeground);
+      white-space: nowrap;
+      flex-shrink: 0;
+      user-select: none;
     }
 
     #search {
       flex: 1;
-      min-width: 80px;
       background: var(--vscode-input-background);
       color: var(--vscode-input-foreground);
       border: 1px solid var(--vscode-input-border, transparent);
       border-radius: 3px;
-      padding: 2px 6px;
-      font-size: 11px;
+      padding: 3px 8px;
+      font-size: 12px;
+      outline: none;
+      transition: border-color 0.15s;
+    }
+    #search:focus {
+      border-color: var(--vscode-focusBorder, #007fd4);
     }
     #search::placeholder { color: var(--vscode-input-placeholderForeground); }
 
-    /* ── Path filter bar ─────────────────────────────────────────────────── */
+    #btn-clear-search {
+      background: transparent;
+      color: var(--vscode-descriptionForeground);
+      border: none;
+      border-radius: 3px;
+      padding: 2px 5px;
+      cursor: pointer;
+      font-size: 12px;
+      flex-shrink: 0;
+      line-height: 1;
+      display: none;
+    }
+    #btn-clear-search:hover {
+      color: var(--vscode-editor-foreground);
+      background: var(--vscode-button-secondaryHoverBackground);
+    }
+    #btn-clear-search.visible { display: block; }
+
+    /* ── Path bar (collapsible, hidden by default) ───────────────────────── */
     #path-bar {
-      display: flex;
+      display: none;
       align-items: center;
       gap: 5px;
-      padding: 3px 8px;
+      padding: 4px 8px;
       background: var(--vscode-sideBar-background);
       border-bottom: 1px solid var(--vscode-panel-border);
       flex-shrink: 0;
+    }
+    #path-bar.open {
+      display: flex;
     }
 
     #root-path-label {
@@ -320,14 +397,18 @@ class TemplateGraphProvider {
       color: var(--vscode-input-foreground);
       border: 1px solid var(--vscode-input-border, transparent);
       border-radius: 3px;
-      padding: 2px 6px;
+      padding: 3px 7px;
       font-size: 11px;
       font-family: var(--vscode-editor-font-family, monospace);
+      outline: none;
+      transition: border-color 0.15s;
+    }
+    #root-path:focus {
+      border-color: var(--vscode-focusBorder, #007fd4);
     }
     #root-path::placeholder { color: var(--vscode-input-placeholderForeground); }
     #root-path.has-value {
       border-color: var(--vscode-focusBorder, #007fd4);
-      background: var(--vscode-input-background);
     }
 
     #btn-apply-path {
@@ -359,12 +440,6 @@ class TemplateGraphProvider {
     #btn-clear-path:hover {
       color: var(--vscode-editor-foreground);
       background: var(--vscode-button-secondaryHoverBackground);
-    }
-
-    #stats {
-      font-size: 10px;
-      color: var(--vscode-descriptionForeground);
-      white-space: nowrap;
     }
 
     #graph-container {
@@ -458,19 +533,29 @@ class TemplateGraphProvider {
   </style>
 </head>
 <body>
+  <!-- Row 1: action buttons -->
   <div id="toolbar">
     <button id="btn-refresh" title="Refresh graph">↺ Refresh</button>
     <button id="btn-fit"     title="Fit graph to view">⊡ Fit</button>
     <button id="btn-reset"   title="Reset node positions">⟳ Reset</button>
-    <input id="search" type="text" placeholder="Filter nodes…" autocomplete="off">
+    <button id="btn-toggle-path" title="Set a sub-directory path to scope the graph">📁 Path<span class="path-dot"></span></button>
     <span id="stats"></span>
-    <button id="btn-expand" title="Open graph in full editor panel">⤢ Expand</button>
+    <button id="btn-expand" title="Open graph in full editor panel" style="${expandBtnStyle}">⤢ Expand</button>
   </div>
+
+  <!-- Row 2: filter nodes (always visible, prominent) -->
+  <div id="filter-bar">
+    <label for="search">🔍</label>
+    <input id="search" type="text" placeholder="Filter by filename or @alias…" autocomplete="off">
+    <button id="btn-clear-search" title="Clear filter">✕</button>
+  </div>
+
+  <!-- Row 3: path bar (collapsible, hidden by default) -->
   <div id="path-bar">
-    <label for="root-path" id="root-path-label">📁 Path:</label>
-    <input id="root-path" type="text" placeholder="e.g. templates  (empty = whole workspace)" autocomplete="off" spellcheck="false">
-    <button id="btn-apply-path" title="Apply path filter and rebuild graph">Apply</button>
-    <button id="btn-clear-path" title="Clear path filter — show entire workspace">✕</button>
+    <label for="root-path" id="root-path-label">📁</label>
+    <input id="root-path" type="text" placeholder="Sub-directory to scope graph (e.g. templates)" autocomplete="off" spellcheck="false">
+    <button id="btn-apply-path" title="Apply path and rebuild graph">Apply</button>
+    <button id="btn-clear-path" title="Clear path — show entire workspace">✕</button>
   </div>
 
   <div id="graph-container">
