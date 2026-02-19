@@ -198,6 +198,28 @@ stages:
   });
 });
 
+  it('parses parameters in files with CRLF line endings (baseIndent = 0)', () => {
+    // Reproduces the bug found in Windows-authored repos where parameters are
+    // written at column 0 (no leading spaces) and files use CRLF (\r\n).
+    // The old exit condition `!/^\s/.test(trimmed)` fired on "- name: foo"
+    // at column 0, breaking out of the block before any param was captured.
+    const yaml = 'parameters:\r\n- name: appName\r\n  type: string\r\n- name: region\r\n  type: string\r\n  default: eastus\r\nsteps:\r\n- script: echo hi\r\n';
+    const params = parseParameters(yaml);
+    assert.strictEqual(params.length, 2, 'should parse both params despite CRLF + baseIndent=0');
+    assert.strictEqual(params[0].name, 'appName');
+    assert.strictEqual(params[0].type, 'string');
+    assert.strictEqual(params[1].name, 'region');
+    assert.strictEqual(params[1].default, 'eastus');
+  });
+
+  it('detects # REQUIRED marker with CRLF line endings', () => {
+    const yaml = 'parameters:\r\n# REQUIRED\r\n- name: purposeID\r\n  type: string\r\n- name: optional\r\n  type: string\r\n  default: foo\r\n';
+    const params = parseParameters(yaml);
+    assert.strictEqual(params.length, 2);
+    assert.strictEqual(params[0].required, true,  'purposeID should be required');
+    assert.strictEqual(params[1].required, false, 'optional should not be required');
+  });
+
 // ---------------------------------------------------------------------------
 // parseRepositoryAliases
 // ---------------------------------------------------------------------------

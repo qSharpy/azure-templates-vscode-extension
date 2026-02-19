@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.4.2] - 2026-02-19
+
+### Fixed
+
+- **Parameters not shown for Windows-authored YAML files** — `parseParameters()` now correctly
+  handles template files with CRLF (`\r\n`) line endings where parameters are written at column 0
+  (no leading indentation). Previously, the block-exit condition fired on the very first
+  `- name:` list item at column 0, causing the function to return 0 parameters for every template
+  in repos authored on Windows. The tree view parameter badges, hover tooltips, diagnostics, and
+  IntelliSense completions were all affected. The fix also ensures that `# comment` lines at
+  column 0 (used to annotate parameters) no longer prematurely terminate the parameters block.
+  Two regression tests added to prevent recurrence.
+
 ## [1.4.1] - 2026-02-19
 
 ### Changed

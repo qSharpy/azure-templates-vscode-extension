@@ -24,15 +24,6 @@ function parseParameters(text) {
   const lines = text.split('\n');
   const params = [];
 
-  // ── DEBUG ──────────────────────────────────────────────────────────────────
-  const _dbgLog = (msg) => console.log('[ATN-DEBUG][parseParameters] ' + msg);
-  const firstParamLine = lines.findIndex(l => /^parameters\s*:/.test(l.trimEnd()));
-  _dbgLog(`text length=${text.length}  firstParamLine=${firstParamLine}`);
-  if (firstParamLine !== -1) {
-    _dbgLog(`  lines around parameters: ${JSON.stringify(lines.slice(Math.max(0, firstParamLine - 1), firstParamLine + 6))}`);
-  }
-  // ── END DEBUG ──────────────────────────────────────────────────────────────
-
   // Find the "parameters:" block
   let inParamsBlock = false;
   let baseIndent = -1;
@@ -45,14 +36,17 @@ function parseParameters(text) {
     if (!inParamsBlock) {
       if (/^parameters\s*:/.test(trimmed)) {
         inParamsBlock = true;
-        _dbgLog(`  entered parameters block at line ${i}`);
       }
       continue;
     }
 
-    // Once inside the block, a non-indented non-empty line that isn't a list
-    // item means we've left the parameters block
-    if (trimmed.length > 0 && !/^\s/.test(trimmed) && !/^parameters\s*:/.test(trimmed)) {
+    // Once inside the block, a non-indented non-empty line that is NOT a list
+    // item or a comment means we've left the parameters block.
+    // We must NOT break on:
+    //   - "- name: foo" lines at column 0 (baseIndent = 0 is valid YAML)
+    //   - "# comment" lines at column 0 (common in repos that annotate params)
+    // Both patterns are legal inside a parameters block in Azure Pipelines YAML.
+    if (trimmed.length > 0 && !/^\s/.test(trimmed) && !/^-/.test(trimmed) && !/^#/.test(trimmed) && !/^parameters\s*:/.test(trimmed)) {
       break;
     }
 
@@ -106,11 +100,9 @@ function parseParameters(text) {
       }
     }
 
-    _dbgLog(`  param found: name=${paramName}  type=${type}  default=${defaultValue}  required=${required}`);
     params.push({ name: paramName, type, default: defaultValue, required });
   }
 
-  _dbgLog(`  → total params returned: ${params.length}`);
   return params;
 }
 
@@ -394,18 +386,10 @@ function parsePassedParameters(lines, templateLine) {
  */
 function findRepoRoot(startDir) {
   let dir = startDir;
-  const visited = [];
   while (true) {
-    visited.push(dir);
-    if (fs.existsSync(path.join(dir, '.git'))) {
-      console.log(`[ATN-DEBUG][findRepoRoot] found .git at: ${dir}  (walked ${visited.length} dirs from ${startDir})`);
-      return dir;
-    }
+    if (fs.existsSync(path.join(dir, '.git'))) return dir;
     const parent = path.dirname(dir);
-    if (parent === dir) {
-      console.log(`[ATN-DEBUG][findRepoRoot] no .git found, falling back to startDir: ${startDir}`);
-      return startDir; // reached filesystem root
-    }
+    if (parent === dir) return startDir; // reached filesystem root
     dir = parent;
   }
 }
@@ -430,26 +414,19 @@ function resolveTemplatePath(templateRef, currentFile, repoAliases) {
   const ref = templateRef.trim();
   if (!ref) return null;
 
-  const _dbg = (msg) => console.log(`[ATN-DEBUG][resolveTemplatePath] ${msg}`);
-  _dbg(`ref=${JSON.stringify(ref)}  currentFile=${currentFile}`);
-
   // Check for cross-repo reference: "path/to/template.yml@alias"
   const atIndex = ref.lastIndexOf('@');
   if (atIndex !== -1) {
     const templatePath = ref.slice(0, atIndex).trim();
     const alias = ref.slice(atIndex + 1).trim();
-    _dbg(`  cross-repo: templatePath=${templatePath}  alias=${alias}`);
 
     // Special alias "self" means the current repository — treat as normal
     if (alias === 'self') {
-      const r = resolveLocalPath(templatePath, currentFile);
-      _dbg(`  @self → ${JSON.stringify(r)}`);
-      return r;
+      return resolveLocalPath(templatePath, currentFile);
     }
 
     const repoName = repoAliases && repoAliases[alias];
     if (!repoName) {
-      _dbg(`  alias "${alias}" NOT in repoAliases (${JSON.stringify(repoAliases)}) → unknownAlias`);
       // Alias not found in resources.repositories — return null so the caller
       // can show a "repository alias not found" message
       return { filePath: null, repoName: null, alias, unknownAlias: true };
@@ -459,13 +436,10 @@ function resolveTemplatePath(templateRef, currentFile, repoAliases) {
     const repoRoot = findRepoRoot(path.dirname(currentFile));
     const parentDir = path.dirname(repoRoot);
     const filePath = path.join(parentDir, repoName, templatePath.startsWith('/') ? templatePath.slice(1) : templatePath);
-    _dbg(`  repoRoot=${repoRoot}  parentDir=${parentDir}  filePath=${filePath}`);
     return { filePath, repoName, alias };
   }
 
-  const r = resolveLocalPath(ref, currentFile);
-  _dbg(`  local → ${JSON.stringify(r)}`);
-  return r;
+  return resolveLocalPath(ref, currentFile);
 }
 
 /**
@@ -476,19 +450,14 @@ function resolveTemplatePath(templateRef, currentFile, repoAliases) {
  * @returns {{ filePath: string, repoName: null }}
  */
 function resolveLocalPath(ref, currentFile) {
-  const _dbg = (msg) => console.log(`[ATN-DEBUG][resolveLocalPath] ${msg}`);
   if (ref.startsWith('/')) {
     // Absolute path: resolve from the repo root (nearest .git ancestor)
     const repoRoot = findRepoRoot(path.dirname(currentFile));
-    const filePath = path.join(repoRoot, ref.slice(1));
-    _dbg(`absolute ref="${ref}"  repoRoot=${repoRoot}  → filePath=${filePath}`);
-    return { filePath, repoName: null };
+    return { filePath: path.join(repoRoot, ref.slice(1)), repoName: null };
   }
 
   // Relative path: resolve from the directory of the current file
-  const filePath = path.join(path.dirname(currentFile), ref);
-  _dbg(`relative ref="${ref}"  dir=${path.dirname(currentFile)}  → filePath=${filePath}`);
-  return { filePath, repoName: null };
+  return { filePath: path.join(path.dirname(currentFile), ref), repoName: null };
 }
 
 /**
