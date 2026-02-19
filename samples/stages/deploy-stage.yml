@@ -1,6 +1,6 @@
 parameters:
   - name: environment #hehe problem
-    type: string
+    type: string #hehe problem
   - name: azureSubscription
     type: string
   - name: appName

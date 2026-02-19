@@ -48,7 +48,7 @@ Module._load  = function (request) {
   return _orig.apply(this, arguments);
 };
 
-const { parseParameters, parseRepositoryAliases, resolveTemplatePath, parseVariables, parsePassedParameters } =
+const { parseParameters, parseRepositoryAliases, resolveTemplatePath, parseVariables, parsePassedParameters, findOwningTemplateLine } =
   require('../../hoverProvider');
 
 Module._load = _orig; // restore immediately after require
@@ -592,5 +592,141 @@ describe('parsePassedParameters', () => {
     const result = parsePassedParameters(lines, 0);
     assert.strictEqual(result['buildConfig'].value, '$(buildConfiguration)');
     assert.strictEqual(result['version'].value, '${{ variables.dotnetVersion }}');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// parseParameters — line number tracking (new in param go-to-definition)
+// ---------------------------------------------------------------------------
+
+describe('parseParameters — line numbers', () => {
+
+  it('records the correct 0-based line for each parameter', () => {
+    // Line 0: (empty — leading newline from template literal)
+    // Line 1: "parameters:"
+    // Line 2: "  - name: project"
+    // Line 3: "    type: string"
+    // Line 4: "  - name: buildConfiguration"
+    const yaml = `
+parameters:
+  - name: project
+    type: string
+  - name: buildConfiguration
+    type: string
+    default: Release
+`;
+    const params = parseParameters(yaml);
+    assert.strictEqual(params.length, 2);
+    assert.strictEqual(params[0].name, 'project');
+    assert.strictEqual(params[0].line, 2);   // "  - name: project" is line 2
+    assert.strictEqual(params[1].name, 'buildConfiguration');
+    assert.strictEqual(params[1].line, 4);   // "  - name: buildConfiguration" is line 4
+  });
+
+  it('records line 0 when parameters block starts at the very first line', () => {
+    const yaml = 'parameters:\n- name: appName\n  type: string\n';
+    const params = parseParameters(yaml);
+    assert.strictEqual(params.length, 1);
+    assert.strictEqual(params[0].name, 'appName');
+    assert.strictEqual(params[0].line, 1);   // "- name: appName" is line 1
+  });
+
+  it('line numbers survive comment lines between parameters', () => {
+    const yaml = `
+parameters:
+  # REQUIRED
+  - name: project
+    type: string
+  # OPTIONAL
+  - name: dotnetVersion
+    type: string
+    default: '8.0.x'
+`;
+    const params = parseParameters(yaml);
+    assert.strictEqual(params[0].name, 'project');
+    assert.strictEqual(params[0].line, 3);   // line 3 (0-based)
+    assert.strictEqual(params[1].name, 'dotnetVersion');
+    assert.strictEqual(params[1].line, 6);   // line 6 (0-based)
+  });
+});
+
+// ---------------------------------------------------------------------------
+// findOwningTemplateLine
+// ---------------------------------------------------------------------------
+
+describe('findOwningTemplateLine', () => {
+
+  it('returns the template line index when cursor is on a direct param key', () => {
+    // Simulates:
+    //   0: "- template: templates/build.yml"
+    //   1: "  parameters:"
+    //   2: "    project: '**/*.csproj'"   ← cursor
+    const lines = [
+      '- template: templates/build.yml',
+      '  parameters:',
+      "    project: '**/*.csproj'",
+    ];
+    assert.strictEqual(findOwningTemplateLine(lines, 2), 0);
+  });
+
+  it('returns the template line index with deeper indentation (nested jobs)', () => {
+    // Simulates a template call inside a jobs block:
+    //   0: "      - template: templates/build.yml"
+    //   1: "        parameters:"
+    //   2: "          project: foo"   ← cursor
+    const lines = [
+      '      - template: templates/build.yml',
+      '        parameters:',
+      '          project: foo',
+    ];
+    assert.strictEqual(findOwningTemplateLine(lines, 2), 0);
+  });
+
+  it('returns -1 when cursor is not inside a template parameters block', () => {
+    // Cursor is on a key inside a "task inputs:" block, not a template
+    const lines = [
+      '- task: DotNetCoreCLI@2',
+      '  inputs:',
+      '    command: build',   // ← cursor — not a template param
+    ];
+    assert.strictEqual(findOwningTemplateLine(lines, 2), -1);
+  });
+
+  it('returns -1 when there is no template line above at all', () => {
+    const lines = [
+      'stages:',
+      '  - stage: Build',
+      '    displayName: Build',   // ← cursor
+    ];
+    assert.strictEqual(findOwningTemplateLine(lines, 2), -1);
+  });
+
+  it('finds the correct template when multiple templates appear in sequence', () => {
+    // Cursor is on the second template's parameter, not the first
+    //   0: "- template: templates/build.yml"
+    //   1: "  parameters:"
+    //   2: "    project: foo"
+    //   3: "- template: templates/deploy.yml"
+    //   4: "  parameters:"
+    //   5: "    environment: Production"   ← cursor
+    const lines = [
+      '- template: templates/build.yml',
+      '  parameters:',
+      '    project: foo',
+      '- template: templates/deploy.yml',
+      '  parameters:',
+      '    environment: Production',
+    ];
+    assert.strictEqual(findOwningTemplateLine(lines, 5), 3);
+  });
+
+  it('handles blank lines between template and parameters', () => {
+    const lines = [
+      '- template: templates/build.yml',
+      '',
+      '  parameters:',
+      '    project: foo',   // ← cursor
+    ];
+    assert.strictEqual(findOwningTemplateLine(lines, 3), 0);
   });
 });

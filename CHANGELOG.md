@@ -7,6 +7,34 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.6.0] - 2026-02-19
+
+### Added
+
+- **Parameter Go-To-Definition** — Ctrl/Cmd+Click (or F12) on a parameter key inside a
+  template call site now navigates directly to the `- name: <param>` line in the referenced
+  template file. Works for all template reference styles: relative paths, absolute `/` paths,
+  and cross-repo `@alias` references.
+
+  Example: in a pipeline file with
+  ```yaml
+  - template: templates/build-dotnet.yml
+    parameters:
+      project: '**/*.csproj'        ← Ctrl+Click jumps to "- name: project" in build-dotnet.yml
+      buildConfiguration: Release   ← Ctrl+Click jumps to "- name: buildConfiguration"
+  ```
+
+- **New internal helper `findOwningTemplateLine(lines, cursorLine)`** — walks upward from the
+  cursor through `parameters:` intermediate keys to locate the `- template:` line that owns
+  the current block. Exported for unit testing and future reuse.
+
+- **9 new unit tests** covering the new functionality:
+  - `parseParameters — line numbers` suite (3 tests): verifies the `line` property on each
+    parsed parameter, including with comment lines between entries.
+  - `findOwningTemplateLine` suite (6 tests): direct param key, deeply-nested indentation,
+    non-template blocks (returns -1), no template above (returns -1), multiple sequential
+    templates (picks the correct one), and blank lines between template and parameters.
+
 ## [1.5.0] - 2026-02-19
 
 ### Added

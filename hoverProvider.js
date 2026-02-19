@@ -63,7 +63,7 @@ function parseParameters(text) {
     // Only process items at the same indent level (direct children)
     if (indent !== baseIndent) continue;
 
-    const paramName = nameMatch[2].trim();
+    const paramName = nameMatch[2].replace(/\s*#.*$/, '').trim();
 
     // Scan forward for type and default within this parameter's sub-block
     let type = 'string';
@@ -83,13 +83,13 @@ function parseParameters(text) {
 
       const typeMatch = /^\s+type\s*:\s*(.+)$/.exec(sub);
       if (typeMatch) {
-        type = typeMatch[1].trim();
+        type = typeMatch[1].replace(/\s*#.*$/, '').trim();
         continue;
       }
 
       const defaultMatch = /^\s+default\s*:\s*(.*)$/.exec(sub);
       if (defaultMatch) {
-        defaultValue = defaultMatch[1].trim();
+        defaultValue = defaultMatch[1].replace(/\s*#.*$/, '').trim();
         continue;
       }
     }
@@ -98,10 +98,68 @@ function parseParameters(text) {
     // Azure Pipelines runtime behaviour exactly.
     const required = defaultValue === undefined;
 
-    params.push({ name: paramName, type, default: defaultValue, required });
+    params.push({ name: paramName, type, default: defaultValue, required, line: i });
   }
 
   return params;
+}
+
+/**
+ * Given a document's lines and a cursor line number, walks upward to find the
+ * nearest `- template:` line that "owns" the cursor position (i.e. the cursor
+ * is inside the parameters sub-block of that template call).
+ *
+ * The walk-up tracks the minimum indent seen so far and keeps going as long as
+ * each shallower line is either a `parameters:` key or the `- template:` line
+ * itself.  Any other shallower line means we've left the block.
+ *
+ * Example structure (indents shown as numbers):
+ *   10  - template: templates/build-dotnet.yml
+ *   12    parameters:
+ *   14      project: '**\/*.csproj'    ← cursor
+ *
+ * Returns the 0-based line index of the `- template:` line, or -1 if not found.
+ *
+ * @param {string[]} lines        All lines of the document (0-based)
+ * @param {number}   cursorLine   0-based line index of the cursor
+ * @returns {number}
+ */
+function findOwningTemplateLine(lines, cursorLine) {
+  const cursorRaw = lines[cursorLine];
+  const cursorIndent = cursorRaw.length - cursorRaw.trimStart().length;
+
+  // Track the minimum indent we've accepted so far; we only step through lines
+  // whose indent is strictly less than the current minimum (i.e. each ancestor).
+  let minIndentSeen = cursorIndent;
+
+  for (let i = cursorLine - 1; i >= 0; i--) {
+    const raw = lines[i];
+    const trimmed = raw.trimEnd();
+    const stripped = trimmed.trimStart();
+
+    if (stripped === '') continue;
+
+    const lineIndent = trimmed.length - stripped.length;
+
+    // Only consider lines that are shallower than what we've seen so far
+    if (lineIndent >= minIndentSeen) continue;
+
+    minIndentSeen = lineIndent;
+
+    // Is this the template line?
+    const templateMatch = /(?:^|\s)-?\s*template\s*:\s*(.+)$/.exec(
+      trimmed.replace(/(^\s*#.*|\s#.*)$/, '')
+    );
+    if (templateMatch) return i;
+
+    // Is this a "parameters:" key? — allowed intermediate ancestor, keep going
+    if (/^parameters\s*:/.test(stripped)) continue;
+
+    // Any other shallower line means we've left the template call block
+    return -1;
+  }
+
+  return -1;
 }
 
 /**
@@ -661,8 +719,10 @@ const hoverProvider = {
 };
 
 /**
- * Definition provider: powers F12 / Cmd+Click / Ctrl+Click on a "template:" line.
- * Returns a Location pointing at the first character of the resolved template file.
+ * Definition provider: powers F12 / Cmd+Click / Ctrl+Click on:
+ *   1. A "template:" line  → opens the template file at line 0
+ *   2. A parameter key inside a template call's "parameters:" sub-block
+ *      → opens the template file and jumps to the matching "- name: <param>" line
  */
 const definitionProvider = {
   /**
@@ -671,16 +731,77 @@ const definitionProvider = {
    * @returns {vscode.Location | undefined}
    */
   provideDefinition(document, position) {
-    const line = document.lineAt(position).text;
-
-    // Strip YAML line comments first to avoid matching "# ── Step template: ..."
-    const match = /(?:^|\s)-?\s*template\s*:\s*(.+)$/.exec(
-      line.replace(/(^\s*#.*|\s#.*)$/, '')
-    );
-    if (!match) return undefined;
-
-    const templateRef = match[1].trim();
+    const lineText = document.lineAt(position).text;
     const docText = document.getText();
+    const lines = docText.replace(/\r\n/g, '\n').split('\n');
+
+    // ── 1. Template line go-to-definition ────────────────────────────────────
+    // Strip YAML line comments first to avoid matching "# ── Step template: ..."
+    const templateLineMatch = /(?:^|\s)-?\s*template\s*:\s*(.+)$/.exec(
+      lineText.replace(/(^\s*#.*|\s#.*)$/, '')
+    );
+    if (templateLineMatch) {
+      const templateRef = templateLineMatch[1].trim();
+      const repoAliases = parseRepositoryAliases(docText);
+      const resolved = resolveTemplatePath(templateRef, document.uri.fsPath, repoAliases);
+
+      if (!resolved || resolved.unknownAlias || !resolved.filePath) return undefined;
+
+      const { filePath } = resolved;
+      if (!fs.existsSync(filePath)) return undefined;
+
+      const targetUri = vscode.Uri.file(filePath);
+      return new vscode.Location(targetUri, new vscode.Position(0, 0));
+    }
+
+    // ── 2. Parameter key go-to-definition ────────────────────────────────────
+    // Detect if the cursor is on a "paramName: value" line inside a template's
+    // parameters sub-block.  The line must look like:
+    //   "    paramName: someValue"
+    // (indented, a bare identifier followed by a colon — not a list item "- ...")
+    const strippedLine = lineText.replace(/(^\s*#.*|\s#.*)$/, '');
+    const paramKeyMatch = /^(\s+)([\w-]+)\s*:/.exec(strippedLine);
+    if (!paramKeyMatch) return undefined;
+
+    // Make sure the cursor is actually on the key token, not the value
+    const keyStart = paramKeyMatch[1].length; // indent width
+    const keyEnd = keyStart + paramKeyMatch[2].length;
+    if (position.character > keyEnd) return undefined;
+
+    const paramName = paramKeyMatch[2];
+
+    // Walk upward to find the owning "- template:" line
+    const templateLineIdx = findOwningTemplateLine(lines, position.line);
+    if (templateLineIdx === -1) return undefined;
+
+    // Verify the cursor is actually inside the "parameters:" sub-block of that
+    // template call (not some other indented block like "inputs:" or "env:").
+    // Scan between templateLineIdx+1 and cursorLine for a "parameters:" key.
+    let foundParamsBlock = false;
+    const templateIndent = lines[templateLineIdx].length - lines[templateLineIdx].trimStart().length;
+    for (let i = templateLineIdx + 1; i <= position.line; i++) {
+      const t = lines[i].trimEnd();
+      const s = t.trimStart();
+      if (s === '') continue;
+      const ind = t.length - s.length;
+      // A "parameters:" key at one level deeper than the template line
+      if (ind > templateIndent && /^parameters\s*:/.test(s)) {
+        foundParamsBlock = true;
+        break;
+      }
+      // If we hit a sibling key at the same indent as the template line, stop
+      if (ind <= templateIndent) break;
+    }
+    if (!foundParamsBlock) return undefined;
+
+    // Resolve the template file
+    const templateLineText = lines[templateLineIdx];
+    const templateRefMatch = /(?:^|\s)-?\s*template\s*:\s*(.+)$/.exec(
+      templateLineText.replace(/(^\s*#.*|\s#.*)$/, '')
+    );
+    if (!templateRefMatch) return undefined;
+
+    const templateRef = templateRefMatch[1].trim();
     const repoAliases = parseRepositoryAliases(docText);
     const resolved = resolveTemplatePath(templateRef, document.uri.fsPath, repoAliases);
 
@@ -689,8 +810,21 @@ const definitionProvider = {
     const { filePath } = resolved;
     if (!fs.existsSync(filePath)) return undefined;
 
+    // Parse the template's parameters block (now includes line numbers)
+    let templateText;
+    try {
+      templateText = fs.readFileSync(filePath, 'utf8');
+    } catch {
+      return undefined;
+    }
+
+    const templateParams = parseParameters(templateText);
+    const paramDef = templateParams.find(p => p.name === paramName);
+    if (!paramDef) return undefined;
+
+    // paramDef.line is the 0-based line of "  - name: <paramName>" in the template
     const targetUri = vscode.Uri.file(filePath);
-    return new vscode.Location(targetUri, new vscode.Position(0, 0));
+    return new vscode.Location(targetUri, new vscode.Position(paramDef.line, 0));
   }
 };
 
@@ -705,4 +839,5 @@ module.exports = {
   resolveTemplatePath,
   buildHoverMarkdown,
   findRepoRoot,
+  findOwningTemplateLine,
 };
