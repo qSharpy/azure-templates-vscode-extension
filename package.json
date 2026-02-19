@@ -53,6 +53,12 @@
           "minimum": 100,
           "maximum": 5000,
           "description": "Milliseconds to wait after a document change before re-running diagnostics."
+        },
+        "azure-templates-navigator.graph.rootPath": {
+          "type": "string",
+          "default": "",
+          "description": "Relative path (from the workspace root) to scan for YAML files in the Template Graph. Leave empty to scan the entire workspace. Example: 'templates' or 'pipelines/api'. This setting is workspace-scoped so each repo can have its own default.",
+          "scope": "resource"
         }
       }
     },

@@ -14,6 +14,7 @@ let allNodes = [];
 let allEdges = [];
 let simulation = null;
 let filterText = '';
+let currentRootPath = '';   // tracks the active path filter
 
 // ---------------------------------------------------------------------------
 // Colour palette (matches legend in HTML)
@@ -55,6 +56,9 @@ const ctxMenu      = document.getElementById('ctx-menu');
 const emptyState   = document.getElementById('empty-state');
 const statsEl      = document.getElementById('stats');
 const searchInput  = document.getElementById('search');
+const rootPathInput = document.getElementById('root-path');
+const btnApplyPath  = document.getElementById('btn-apply-path');
+const btnClearPath  = document.getElementById('btn-clear-path');
 
 const svg = d3.select(svgEl);
 
@@ -92,6 +96,46 @@ document.getElementById('btn-expand').addEventListener('click', () => {
 searchInput.addEventListener('input', () => {
   filterText = searchInput.value.trim().toLowerCase();
   applyFilter();
+});
+
+// ---------------------------------------------------------------------------
+// Path filter bar
+// ---------------------------------------------------------------------------
+
+/**
+ * Sends a setRootPath message to the extension host and triggers a graph
+ * rebuild with the new sub-directory.
+ * @param {string} newPath
+ */
+function applyRootPath(newPath) {
+  const trimmed = newPath.trim();
+  currentRootPath = trimmed;
+  updatePathInputStyle();
+  vscode.postMessage({ type: 'setRootPath', rootPath: trimmed });
+}
+
+function updatePathInputStyle() {
+  if (currentRootPath) {
+    rootPathInput.classList.add('has-value');
+  } else {
+    rootPathInput.classList.remove('has-value');
+  }
+}
+
+btnApplyPath.addEventListener('click', () => {
+  applyRootPath(rootPathInput.value);
+});
+
+// Apply on Enter key inside the path input
+rootPathInput.addEventListener('keydown', (e) => {
+  if (e.key === 'Enter') {
+    applyRootPath(rootPathInput.value);
+  }
+});
+
+btnClearPath.addEventListener('click', () => {
+  rootPathInput.value = '';
+  applyRootPath('');
 });
 
 // ---------------------------------------------------------------------------
@@ -162,6 +206,13 @@ window.addEventListener('message', (event) => {
   const msg = event.data;
   switch (msg.type) {
     case 'graphData':
+      // Sync the path input with whatever the extension used (e.g. from the
+      // persisted workspace setting on first load).
+      if (typeof msg.rootPath === 'string' && msg.rootPath !== rootPathInput.value) {
+        rootPathInput.value = msg.rootPath;
+        currentRootPath = msg.rootPath;
+        updatePathInputStyle();
+      }
       renderGraph(msg.nodes, msg.edges);
       break;
     case 'noWorkspace':

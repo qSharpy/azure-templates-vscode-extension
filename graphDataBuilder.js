@@ -120,13 +120,20 @@ function extractTemplateRefs(filePath) {
 
 /**
  * Builds the full graph data (nodes + edges) by scanning every YAML file
- * in the workspace root.
+ * in the workspace root (or a sub-directory of it).
  *
  * @param {string} workspaceRoot  Absolute path to the workspace folder
+ * @param {string} [subPath]      Optional relative sub-path to scan instead of the full root.
+ *                                E.g. "templates" or "pipelines/api".
+ *                                If empty / falsy the entire workspace is scanned.
  * @returns {{ nodes: GraphNode[], edges: GraphEdge[] }}
  */
-function buildWorkspaceGraph(workspaceRoot) {
-  const yamlFiles = collectYamlFiles(workspaceRoot);
+function buildWorkspaceGraph(workspaceRoot, subPath) {
+  const scanRoot = (subPath && subPath.trim())
+    ? path.join(workspaceRoot, subPath.trim().replace(/^[/\\]+/, ''))
+    : workspaceRoot;
+
+  const yamlFiles = collectYamlFiles(scanRoot);
 
   /** @type {Map<string, GraphNode>} */
   const nodeMap = new Map();

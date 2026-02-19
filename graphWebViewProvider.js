@@ -27,6 +27,12 @@ class TemplateGraphProvider {
     this._context = context;
     /** @type {vscode.WebviewView|null} */
     this._view = null;
+    /**
+     * In-memory override of the root path for the current session.
+     * When null the VS Code workspace setting is used instead.
+     * @type {string|null}
+     */
+    this._rootPathOverride = null;
   }
 
   /**
@@ -96,7 +102,7 @@ class TemplateGraphProvider {
 
   /**
    * @private
-   * @param {{ type: string, filePath?: string, text?: string }} msg
+   * @param {{ type: string, filePath?: string, text?: string, rootPath?: string }} msg
    * @param {vscode.Webview} webview  – the webview that sent the message
    */
   _handleMessage(msg, webview) {
@@ -137,9 +143,42 @@ class TemplateGraphProvider {
         this._sendGraphData(webview);
         break;
 
+      case 'setRootPath': {
+        // The user typed a new path in the toolbar input.
+        // 1. Keep an in-memory override for the current session.
+        this._rootPathOverride = (msg.rootPath || '').trim();
+
+        // 2. Persist to the workspace-scoped VS Code setting so it survives
+        //    reloads and is per-repo (workspace scope).
+        const config = vscode.workspace.getConfiguration('azure-templates-navigator');
+        config.update('graph.rootPath', this._rootPathOverride, vscode.ConfigurationTarget.Workspace)
+          .then(undefined, () => {
+            // Workspace settings may not be writable in some environments
+            // (e.g. no .vscode/settings.json yet) — silently ignore.
+          });
+
+        // 3. Rebuild and push new graph data immediately.
+        this._sendGraphData(webview);
+        break;
+      }
+
       default:
         break;
     }
+  }
+
+  /**
+   * Returns the effective root-path sub-directory to scan.
+   * Priority: in-memory override → workspace setting → '' (full workspace).
+   * @private
+   * @returns {string}
+   */
+  _getEffectiveRootPath() {
+    if (this._rootPathOverride !== null) {
+      return this._rootPathOverride;
+    }
+    const config = vscode.workspace.getConfiguration('azure-templates-navigator');
+    return (config.get('graph.rootPath') || '').trim();
   }
 
   /**
@@ -156,10 +195,11 @@ class TemplateGraphProvider {
     }
 
     const workspaceRoot = workspaceFolders[0].uri.fsPath;
+    const subPath = this._getEffectiveRootPath();
 
     try {
-      const { nodes, edges } = buildWorkspaceGraph(workspaceRoot);
-      webview.postMessage({ type: 'graphData', nodes, edges });
+      const { nodes, edges } = buildWorkspaceGraph(workspaceRoot, subPath);
+      webview.postMessage({ type: 'graphData', nodes, edges, rootPath: subPath });
     } catch (err) {
       webview.postMessage({
         type: 'error',
@@ -254,6 +294,72 @@ class TemplateGraphProvider {
       font-size: 11px;
     }
     #search::placeholder { color: var(--vscode-input-placeholderForeground); }
+
+    /* ── Path filter bar ─────────────────────────────────────────────────── */
+    #path-bar {
+      display: flex;
+      align-items: center;
+      gap: 5px;
+      padding: 3px 8px;
+      background: var(--vscode-sideBar-background);
+      border-bottom: 1px solid var(--vscode-panel-border);
+      flex-shrink: 0;
+    }
+
+    #root-path-label {
+      font-size: 11px;
+      color: var(--vscode-descriptionForeground);
+      white-space: nowrap;
+      flex-shrink: 0;
+    }
+
+    #root-path {
+      flex: 1;
+      min-width: 60px;
+      background: var(--vscode-input-background);
+      color: var(--vscode-input-foreground);
+      border: 1px solid var(--vscode-input-border, transparent);
+      border-radius: 3px;
+      padding: 2px 6px;
+      font-size: 11px;
+      font-family: var(--vscode-editor-font-family, monospace);
+    }
+    #root-path::placeholder { color: var(--vscode-input-placeholderForeground); }
+    #root-path.has-value {
+      border-color: var(--vscode-focusBorder, #007fd4);
+      background: var(--vscode-input-background);
+    }
+
+    #btn-apply-path {
+      background: var(--vscode-button-background);
+      color: var(--vscode-button-foreground);
+      border: none;
+      border-radius: 3px;
+      padding: 2px 8px;
+      cursor: pointer;
+      font-size: 11px;
+      white-space: nowrap;
+      flex-shrink: 0;
+    }
+    #btn-apply-path:hover {
+      background: var(--vscode-button-hoverBackground);
+    }
+
+    #btn-clear-path {
+      background: transparent;
+      color: var(--vscode-descriptionForeground);
+      border: none;
+      border-radius: 3px;
+      padding: 2px 5px;
+      cursor: pointer;
+      font-size: 12px;
+      flex-shrink: 0;
+      line-height: 1;
+    }
+    #btn-clear-path:hover {
+      color: var(--vscode-editor-foreground);
+      background: var(--vscode-button-secondaryHoverBackground);
+    }
 
     #stats {
       font-size: 10px;
@@ -359,6 +465,12 @@ class TemplateGraphProvider {
     <input id="search" type="text" placeholder="Filter nodes…" autocomplete="off">
     <span id="stats"></span>
     <button id="btn-expand" title="Open graph in full editor panel">⤢ Expand</button>
+  </div>
+  <div id="path-bar">
+    <label for="root-path" id="root-path-label">📁 Path:</label>
+    <input id="root-path" type="text" placeholder="e.g. templates  (empty = whole workspace)" autocomplete="off" spellcheck="false">
+    <button id="btn-apply-path" title="Apply path filter and rebuild graph">Apply</button>
+    <button id="btn-clear-path" title="Clear path filter — show entire workspace">✕</button>
   </div>
 
   <div id="graph-container">
