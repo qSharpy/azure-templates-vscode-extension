@@ -7,6 +7,7 @@ const { createDiagnosticsPanelProvider } = require('./diagnosticsPanelProvider')
 const { completionProvider } = require('./completionProvider');
 const { createTreeViewProvider } = require('./treeViewProvider');
 const { createGraphViewProvider } = require('./graphWebViewProvider');
+const { quickFixProvider } = require('./quickFixProvider');
 
 /**
  * Called once when the extension is first activated.
@@ -47,6 +48,20 @@ function activate(context) {
   const diagProvider = createDiagnosticProvider(context, {
     onDidUpdate: (results) => diagPanelProvider.update(results),
   });
+
+  // ── Quick-fix provider ────────────────────────────────────────────────────
+  // Provides CodeActions for diagnostics emitted by the diagnostic provider:
+  //   • missing-required-param → "Add missing parameter"
+  //   • unknown-param          → "Remove unknown parameter"
+  //   • type-mismatch          → "Fix type mismatch"
+  const quickFixDisposable = vscode.languages.registerCodeActionsProvider(
+    { language: 'yaml', scheme: '*' },
+    quickFixProvider,
+    {
+      providedCodeActionKinds: [vscode.CodeActionKind.QuickFix],
+    }
+  );
+  context.subscriptions.push(quickFixDisposable);
 
   // ── Command: refresh diagnostics manually ─────────────────────────────────
   const refreshDiagsCmd = vscode.commands.registerCommand(

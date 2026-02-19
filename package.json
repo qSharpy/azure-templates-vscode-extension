@@ -121,6 +121,21 @@
         "title": "Toggle Full Path Labels",
         "category": "Azure Templates Navigator",
         "icon": "$(symbol-file)"
+      },
+      {
+        "command": "azure-templates-navigator.quickfix.addMissingParam",
+        "title": "Add Missing Parameter",
+        "category": "Azure Templates Navigator"
+      },
+      {
+        "command": "azure-templates-navigator.quickfix.removeUnknownParam",
+        "title": "Remove Unknown Parameter",
+        "category": "Azure Templates Navigator"
+      },
+      {
+        "command": "azure-templates-navigator.quickfix.fixTypeMismatch",
+        "title": "Fix Type Mismatch",
+        "category": "Azure Templates Navigator"
       }
     ],
     "viewsContainers": {
