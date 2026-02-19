@@ -66,16 +66,19 @@ class TemplateNode {
  * @returns {TemplateNode[]}
  */
 function getTemplateChildren(filePath, visited = new Set()) {
+  console.log(`[ATN DEBUG] getTemplateChildren called: filePath="${filePath}"`);
   let text;
   try {
     text = fs.readFileSync(filePath, 'utf8');
   } catch {
+    console.log(`[ATN DEBUG] getTemplateChildren: readFileSync FAILED for "${filePath}"`);
     return [];
   }
 
   const lines = text.split('\n');
   const repoAliases = parseRepositoryAliases(text);
   const children = [];
+  let templateLinesFound = 0;
 
   for (const line of lines) {
     // Strip YAML line comments before matching to avoid false positives from
@@ -83,6 +86,7 @@ function getTemplateChildren(filePath, visited = new Set()) {
     const stripped = line.replace(/(^\s*#.*|\s#.*)$/, '');
     const match = /(?:^|\s)-?\s*template\s*:\s*(.+)$/.exec(stripped);
     if (!match) continue;
+    templateLinesFound++;
 
     const templateRef = match[1].trim();
 
@@ -172,6 +176,7 @@ function getTemplateChildren(filePath, visited = new Set()) {
     }));
   }
 
+  console.log(`[ATN DEBUG] getTemplateChildren RESULT: filePath="${filePath}" templateLinesFound=${templateLinesFound} childrenReturned=${children.length} (found=${children.filter(c=>!c.notFound&&!c.unknownAlias).length} notFound=${children.filter(c=>c.notFound).length})`);
   return children;
 }
 

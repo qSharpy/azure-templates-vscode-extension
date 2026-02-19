@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.4.3] - 2026-02-19
+
+### Fixed
+
+- **Required parameters with defaults now emit an Info instead of an Error** — when a template
+  parameter is marked `# REQUIRED` but also declares a `default:` value, and the call site omits
+  that parameter, the diagnostic severity is now `Information` (ℹ) instead of `Error` (🔴).
+  The info message includes the default value that will be used (e.g.
+  `… — default value 'project' will be used`), so the intent is clear without blocking the author.
+  Parameters that are `# REQUIRED` with **no** default continue to emit an `Error` as before.
+
 ## [1.4.2] - 2026-02-19
 
 ### Fixed

@@ -162,6 +162,7 @@ function buildWorkspaceGraph(workspaceRoot, subPath) {
 
   // ── Pass 2: for each file, resolve its template references ───────────────
   console.log(`[ATN DEBUG] buildWorkspaceGraph Pass2: nodeMap has ${nodeMap.size} nodes. Keys sample: ${[...nodeMap.keys()].slice(0,3).join(' | ')}`);
+  let totalRefs = 0, skippedVar = 0, nullResolved = 0, missingFile = 0, edgesAdded = 0;
   for (const filePath of yamlFiles) {
     let text = '';
     try { text = fs.readFileSync(filePath, 'utf8'); } catch { continue; }
@@ -170,11 +171,12 @@ function buildWorkspaceGraph(workspaceRoot, subPath) {
     const refs = extractTemplateRefs(filePath);
 
     for (const { templateRef } of refs) {
+      totalRefs++;
       // Skip variable expressions
-      if (/\$\{/.test(templateRef) || /\$\(/.test(templateRef)) continue;
+      if (/\$\{/.test(templateRef) || /\$\(/.test(templateRef)) { skippedVar++; continue; }
 
       const resolved = resolveTemplatePath(templateRef, filePath, repoAliases);
-      if (!resolved) continue;
+      if (!resolved) { nullResolved++; continue; }
 
       let targetId;
       let edgeLabel;
@@ -199,6 +201,7 @@ function buildWorkspaceGraph(workspaceRoot, subPath) {
         if (!resolvedPath) continue;
 
         if (!fs.existsSync(resolvedPath)) {
+          missingFile++;
           // Missing file node
           console.log(`[ATN DEBUG] Pass2 MISSING: templateRef="${templateRef}" resolvedPath="${resolvedPath}" sourceFile="${filePath}"`);
           targetId = `MISSING:${resolvedPath}`;
@@ -252,12 +255,14 @@ function buildWorkspaceGraph(workspaceRoot, subPath) {
       const edgeKey = `${filePath}→${targetId}`;
       if (!edgeKeys.has(edgeKey)) {
         edgeKeys.add(edgeKey);
+        edgesAdded++;
         const edge = { source: filePath, target: targetId };
         if (edgeLabel) edge.label = edgeLabel;
         edges.push(edge);
       }
     }
   }
+  console.log(`[ATN DEBUG] buildWorkspaceGraph Pass2 SUMMARY: totalRefs=${totalRefs} skippedVar=${skippedVar} nullResolved=${nullResolved} missingFile=${missingFile} edgesAdded=${edgesAdded} finalEdges=${edges.length}`);
 
   // ── Pass 3: fill in paramCount for all resolvable nodes ──────────────────
   for (const [, node] of nodeMap) {
