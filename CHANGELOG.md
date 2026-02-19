@@ -7,6 +7,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.4.7] - 2026-02-19
+
+### Added
+
+- **Template Graph: Upstream & Downstream views in file-scope mode** — when the graph is
+  scoped to the currently active YAML file (📄 File button), the graph now shows **both
+  directions** of the dependency chain:
+  - **↓ Downstream** (blue edges) — templates directly called by the focal file
+  - **↑ Upstream** (amber dashed edges) — all workspace files that call the focal file
+  - The focal node is highlighted with a dashed ring so it is always easy to identify
+  - Hovering a node shows its role: `◎ Focal file`, `↑ Upstream caller`, or
+    `↓ Downstream dependency`
+  - The stats bar shows counts: e.g. `📄 azure-pipelines.yml · 5 nodes · ↓ 3 downstream · ↑ 2 upstream`
+  - The graph legend now includes a colour key for downstream (blue) and upstream (amber dashed) edges
+  - New helper `buildFileGraph()` in `graphDataBuilder.js` performs the two-pass scan
+    (downstream refs from the file + reverse-lookup of all callers across the workspace)
+
 ## [1.4.6] - 2026-02-19
 
 ### Added
