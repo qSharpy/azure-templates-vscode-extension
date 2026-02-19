@@ -66,15 +66,44 @@ class TemplateNode {
  * @returns {TemplateNode[]}
  */
 function getTemplateChildren(filePath, visited = new Set()) {
+  // ── DEBUG ──────────────────────────────────────────────────────────────────
+  const log = vscode.window.createOutputChannel
+    ? (() => {
+        if (!getTemplateChildren._ch) {
+          getTemplateChildren._ch = vscode.window.createOutputChannel('Azure Templates Navigator [DEBUG]');
+        }
+        return getTemplateChildren._ch;
+      })()
+    : null;
+  const dbg = (msg) => { if (log) log.appendLine(msg); console.log('[ATN-DEBUG] ' + msg); };
+
+  dbg(`\n${'─'.repeat(60)}`);
+  dbg(`getTemplateChildren called for: ${filePath}`);
+  // ── END DEBUG ──────────────────────────────────────────────────────────────
+
   let text;
   try {
     text = fs.readFileSync(filePath, 'utf8');
   } catch {
+    dbg(`  ERROR: could not read file`);
     return [];
   }
 
+  // ── DEBUG: check for BOM / CRLF ────────────────────────────────────────────
+  const hasBOM = text.charCodeAt(0) === 0xFEFF;
+  const hasCRLF = text.includes('\r\n');
+  dbg(`  hasBOM=${hasBOM}  hasCRLF=${hasCRLF}  length=${text.length}`);
+  // ── END DEBUG ──────────────────────────────────────────────────────────────
+
   const lines = text.split('\n');
   const repoAliases = parseRepositoryAliases(text);
+
+  // ── DEBUG: show first 5 lines and detected aliases ─────────────────────────
+  dbg(`  First 5 lines:`);
+  lines.slice(0, 5).forEach((l, i) => dbg(`    [${i}] ${JSON.stringify(l)}`));
+  dbg(`  repoAliases: ${JSON.stringify(repoAliases)}`);
+  // ── END DEBUG ──────────────────────────────────────────────────────────────
+
   const children = [];
 
   for (const line of lines) {
@@ -85,9 +114,11 @@ function getTemplateChildren(filePath, visited = new Set()) {
     if (!match) continue;
 
     const templateRef = match[1].trim();
+    dbg(`  Found template ref: ${JSON.stringify(templateRef)}`);
 
     // Skip template expressions with variables — can't resolve at edit time
     if (/\$\{/.test(templateRef) || /\$\(/.test(templateRef)) {
+      dbg(`    → skipped (contains variable expression)`);
       children.push(new TemplateNode({
         label: templateRef,
         templateRef,
@@ -97,10 +128,12 @@ function getTemplateChildren(filePath, visited = new Set()) {
     }
 
     const resolved = resolveTemplatePath(templateRef, filePath, repoAliases);
+    dbg(`    resolveTemplatePath result: ${JSON.stringify(resolved)}`);
 
-    if (!resolved) continue;
+    if (!resolved) { dbg(`    → resolveTemplatePath returned null, skipping`); continue; }
 
     if (resolved.unknownAlias) {
+      dbg(`    → unknownAlias: @${resolved.alias}`);
       children.push(new TemplateNode({
         label: `${templateRef}`,
         templateRef,
@@ -113,6 +146,7 @@ function getTemplateChildren(filePath, visited = new Set()) {
     const { filePath: resolvedPath, repoName } = resolved;
 
     if (!resolvedPath || !fs.existsSync(resolvedPath)) {
+      dbg(`    → NOT FOUND: resolvedPath=${resolvedPath}  exists=${resolvedPath ? fs.existsSync(resolvedPath) : 'n/a'}`);
       children.push(new TemplateNode({
         label: templateRef,
         templateRef,
@@ -125,6 +159,7 @@ function getTemplateChildren(filePath, visited = new Set()) {
 
     // ── Cycle detection ───────────────────────────────────────────────────
     if (visited.has(resolvedPath)) {
+      dbg(`    → CYCLE detected for: ${resolvedPath}`);
       const shortName = path.basename(resolvedPath);
       children.push(new TemplateNode({
         label: repoName ? `${shortName} @${repoName}` : shortName,
@@ -146,10 +181,13 @@ function getTemplateChildren(filePath, visited = new Set()) {
       const params = parseParameters(tplText);
       paramCount = params.length;
       requiredCount = params.filter(p => p.required).length;
+      dbg(`    → resolved OK: ${resolvedPath}  paramCount=${paramCount}  requiredCount=${requiredCount}`);
       // Quick scan: does this file contain any `template:` references?
       const templateLineRe = /(?:^|\s)-?\s*template\s*:\s*(.+)$/;
       hasChildren = tplText.split('\n').some(l => templateLineRe.test(l.replace(/(^\s*#.*|\s#.*)$/, '')));
+      dbg(`    → hasChildren=${hasChildren}`);
     } catch {
+      dbg(`    → ERROR reading resolved file: ${resolvedPath}`);
       // ignore
     }
 
