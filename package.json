@@ -103,6 +103,18 @@
         "title": "Open Graph in Editor Panel",
         "category": "Azure Templates Navigator",
         "icon": "$(screen-full)"
+      },
+      {
+        "command": "azure-templates-navigator.refreshDiagnostics",
+        "title": "Refresh Diagnostics",
+        "category": "Azure Templates Navigator",
+        "icon": "$(refresh)"
+      },
+      {
+        "command": "azure-templates-navigator.openDiagnosticLocation",
+        "title": "Go to Issue",
+        "category": "Azure Templates Navigator",
+        "icon": "$(go-to-file)"
       }
     ],
     "viewsContainers": {
@@ -130,6 +142,13 @@
           "contextualTitle": "Azure Templates Navigator",
           "icon": "$(type-hierarchy)",
           "visibility": "visible"
+        },
+        {
+          "id": "azure-templates-navigator.diagnosticsPanel",
+          "name": "Diagnostics",
+          "contextualTitle": "Azure Templates Navigator",
+          "icon": "$(error)",
+          "visibility": "visible"
         }
       ]
     },
@@ -143,6 +162,11 @@
         {
           "command": "azure-templates-navigator.refreshTemplateGraph",
           "when": "view == azure-templates-navigator.graphView",
+          "group": "navigation"
+        },
+        {
+          "command": "azure-templates-navigator.refreshDiagnostics",
+          "when": "view == azure-templates-navigator.diagnosticsPanel",
           "group": "navigation"
         }
       ],

@@ -3,6 +3,7 @@
 const vscode = require('vscode');
 const { hoverProvider, definitionProvider } = require('./hoverProvider');
 const { createDiagnosticProvider } = require('./diagnosticProvider');
+const { createDiagnosticsPanelProvider } = require('./diagnosticsPanelProvider');
 const { completionProvider } = require('./completionProvider');
 const { createTreeViewProvider } = require('./treeViewProvider');
 const { createGraphViewProvider } = require('./graphWebViewProvider');
@@ -36,9 +37,26 @@ function activate(context) {
     ' ', '\n', ':'  // trigger characters
   );
 
+  // ── Diagnostics panel provider ────────────────────────────────────────────
+  // Sidebar panel showing all diagnostics grouped by file (mirrors Problems tab)
+  const diagPanelProvider = createDiagnosticsPanelProvider(context);
+
   // ── Diagnostic provider ───────────────────────────────────────────────────
-  // Validates template call sites: missing required params, unknown params, type mismatches
-  createDiagnosticProvider(context);
+  // Validates template call sites: missing required params, unknown params, type mismatches.
+  // Passes an onDidUpdate callback so the sidebar panel stays in sync.
+  const diagProvider = createDiagnosticProvider(context, {
+    onDidUpdate: (results) => diagPanelProvider.update(results),
+  });
+
+  // ── Command: refresh diagnostics manually ─────────────────────────────────
+  const refreshDiagsCmd = vscode.commands.registerCommand(
+    'azure-templates-navigator.refreshDiagnostics',
+    async () => {
+      await diagProvider.refresh();
+      vscode.window.showInformationMessage('Azure Templates Navigator: Diagnostics refreshed.');
+    }
+  );
+  context.subscriptions.push(refreshDiagsCmd);
 
   // ── Tree view provider ────────────────────────────────────────────────────
   // Sidebar panel showing the template dependency tree for the active pipeline file

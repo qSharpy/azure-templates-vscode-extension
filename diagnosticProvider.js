@@ -199,29 +199,118 @@ function getDiagnosticsForDocument(document) {
 }
 
 /**
+ * Scans a YAML file on disk (by path) and returns all diagnostics.
+ * Used for workspace-wide scanning of files that are not open in the editor.
+ *
+ * @param {string} fsPath  Absolute path to the YAML file
+ * @returns {vscode.Diagnostic[]}
+ */
+function getDiagnosticsForFile(fsPath) {
+  let text;
+  try {
+    text = fs.readFileSync(fsPath, 'utf8');
+  } catch {
+    return [];
+  }
+  const doc = {
+    getText: () => text,
+    uri: vscode.Uri.file(fsPath),
+    languageId: 'yaml',
+  };
+  return getDiagnosticsForDocument(doc);
+}
+
+/**
+ * Scans every YAML file in the workspace and populates the DiagnosticCollection.
+ * Returns a map of fsPath → Diagnostic[] for consumers (e.g. the sidebar panel).
+ *
+ * @param {vscode.DiagnosticCollection} collection
+ * @returns {Promise<Map<string, vscode.Diagnostic[]>>}
+ */
+async function scanWorkspace(collection) {
+  const results = new Map();
+
+  const uris = await vscode.workspace.findFiles(
+    '**/*.{yml,yaml}',
+    '{**/node_modules/**,**/.git/**}'
+  );
+
+  for (const uri of uris) {
+    try {
+      const diags = getDiagnosticsForFile(uri.fsPath);
+      collection.set(uri, diags);
+      if (diags.length > 0) {
+        results.set(uri.fsPath, diags);
+      }
+    } catch (err) {
+      console.error(`[Azure Templates Navigator] Error scanning ${uri.fsPath}:`, err);
+    }
+  }
+
+  // Clear diagnostics for files that no longer have issues
+  // (collection.set with empty array removes them from Problems tab)
+  return results;
+}
+
+/**
  * Creates and returns the diagnostic provider object that manages the
- * DiagnosticCollection lifecycle and document event subscriptions.
+ * DiagnosticCollection lifecycle, document event subscriptions, and
+ * workspace-wide file watching.
  *
  * @param {vscode.ExtensionContext} context
- * @returns {{ collection: vscode.DiagnosticCollection, dispose: () => void }}
+ * @param {{ onDidUpdate?: (results: Map<string, vscode.Diagnostic[]>) => void }} [opts]
+ * @returns {{ collection: vscode.DiagnosticCollection, refresh: () => Promise<void>, dispose: () => void }}
  */
-function createDiagnosticProvider(context) {
+function createDiagnosticProvider(context, opts = {}) {
   const collection = vscode.languages.createDiagnosticCollection('azure-templates-navigator');
 
   /** @type {NodeJS.Timeout|null} */
   let debounceTimer = null;
 
+  /** @type {Map<string, vscode.Diagnostic[]>} Latest workspace-wide results */
+  let latestResults = new Map();
+
+  /**
+   * Notifies the optional listener with the latest results.
+   */
+  function notifyUpdate() {
+    if (typeof opts.onDidUpdate === 'function') {
+      opts.onDidUpdate(latestResults);
+    }
+  }
+
+  /**
+   * Runs a full workspace scan and fires the update callback.
+   */
+  async function runFullScan() {
+    try {
+      latestResults = await scanWorkspace(collection);
+      notifyUpdate();
+    } catch (err) {
+      console.error('[Azure Templates Navigator] Workspace scan error:', err);
+    }
+  }
+
   /**
    * Schedules a diagnostic refresh for the given document, debounced by 500ms.
+   * After updating the single document, also refreshes the results map so the
+   * sidebar panel stays in sync.
    * @param {vscode.TextDocument} doc
    */
   function scheduleDiagnostics(doc) {
     if (doc.languageId !== 'yaml') return;
     if (debounceTimer) clearTimeout(debounceTimer);
-    debounceTimer = setTimeout(() => {
+    debounceTimer = setTimeout(async () => {
       try {
         const diags = getDiagnosticsForDocument(doc);
         collection.set(doc.uri, diags);
+        // Keep latestResults in sync
+        if (diags.length > 0) {
+          latestResults.set(doc.uri.fsPath, diags);
+        } else {
+          latestResults.delete(doc.uri.fsPath);
+        }
+        notifyUpdate();
       } catch (err) {
         console.error('[Azure Templates Navigator] Diagnostic error:', err);
         collection.set(doc.uri, []);
@@ -229,33 +318,82 @@ function createDiagnosticProvider(context) {
     }, 500);
   }
 
-  // Run on all currently open YAML documents at activation
-  for (const doc of vscode.workspace.textDocuments) {
-    if (doc.languageId === 'yaml') {
-      try {
-        collection.set(doc.uri, getDiagnosticsForDocument(doc));
-      } catch {
-        // ignore errors during initial scan
-      }
-    }
-  }
+  // ── Initial workspace scan ─────────────────────────────────────────────────
+  runFullScan();
 
-  // Subscribe to document events
+  // ── Subscribe to open-document events (fast, in-memory) ───────────────────
   const subs = [
     vscode.workspace.onDidOpenTextDocument(scheduleDiagnostics),
     vscode.workspace.onDidChangeTextDocument(e => scheduleDiagnostics(e.document)),
     vscode.workspace.onDidSaveTextDocument(scheduleDiagnostics),
-    vscode.workspace.onDidCloseTextDocument(doc => collection.delete(doc.uri)),
+    vscode.workspace.onDidCloseTextDocument(doc => {
+      // Re-scan from disk so Problems tab stays accurate after closing
+      try {
+        const diags = getDiagnosticsForFile(doc.uri.fsPath);
+        collection.set(doc.uri, diags);
+        if (diags.length > 0) {
+          latestResults.set(doc.uri.fsPath, diags);
+        } else {
+          latestResults.delete(doc.uri.fsPath);
+        }
+        notifyUpdate();
+      } catch {
+        collection.delete(doc.uri);
+      }
+    }),
   ];
+
+  // ── File-system watcher: pick up changes to files not open in the editor ──
+  const watcher = vscode.workspace.createFileSystemWatcher('**/*.{yml,yaml}');
+
+  const onFileChange = (uri) => {
+    // If the file is already open in an editor, the document-change event
+    // handles it; skip to avoid double-scanning.
+    const isOpen = vscode.workspace.textDocuments.some(
+      d => d.uri.fsPath === uri.fsPath
+    );
+    if (isOpen) return;
+
+    try {
+      const diags = getDiagnosticsForFile(uri.fsPath);
+      collection.set(uri, diags);
+      if (diags.length > 0) {
+        latestResults.set(uri.fsPath, diags);
+      } else {
+        latestResults.delete(uri.fsPath);
+      }
+      notifyUpdate();
+    } catch (err) {
+      console.error(`[Azure Templates Navigator] Watcher error for ${uri.fsPath}:`, err);
+    }
+  };
+
+  watcher.onDidChange(onFileChange);
+  watcher.onDidCreate(onFileChange);
+  watcher.onDidDelete((uri) => {
+    collection.delete(uri);
+    latestResults.delete(uri.fsPath);
+    notifyUpdate();
+  });
 
   subs.forEach(s => context.subscriptions.push(s));
   context.subscriptions.push(collection);
+  context.subscriptions.push(watcher);
 
   return {
     collection,
+    /** Re-runs a full workspace scan on demand. */
+    async refresh() {
+      await runFullScan();
+    },
+    /** Returns the latest results map (fsPath → Diagnostic[]). */
+    getResults() {
+      return latestResults;
+    },
     dispose() {
       if (debounceTimer) clearTimeout(debounceTimer);
       collection.dispose();
+      watcher.dispose();
     },
   };
 }
@@ -263,6 +401,8 @@ function createDiagnosticProvider(context) {
 module.exports = {
   createDiagnosticProvider,
   getDiagnosticsForDocument,
+  getDiagnosticsForFile,
+  scanWorkspace,
   validateCallSite,
   inferValueType,
 };
