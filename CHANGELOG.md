@@ -7,6 +7,44 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.7.0] - 2026-02-20
+
+### Added
+
+- **Quick-Fix Code Actions** — three one-click fixes for diagnostics emitted by the
+  parameter validation engine:
+
+  - **Add missing parameter** (`missing-required-param`) — inserts `<paramName>: ` at
+    the correct indentation inside the `parameters:` sub-block of the template call.
+    If no `parameters:` block exists yet, one is created automatically. The cursor
+    lands on the value placeholder after the fix is applied.
+
+  - **Remove unknown parameter** (`unknown-param`) — deletes the entire line that
+    contains the unrecognised parameter key (including its trailing newline).
+
+  - **Fix type mismatch** (`type-mismatch`) — replaces the current value with the
+    canonical literal for the expected type: `true` for `boolean`, `0` for `number`,
+    `''` for `string`, `[]` for list types (`stepList`, `jobList`, `stageList`, etc.),
+    and `{}` for `object`.
+
+  All three actions are marked `isPreferred` so they appear at the top of the
+  lightbulb menu and can be triggered with a single keyboard shortcut.
+
+- **New file `quickFixProvider.js`** — implements `vscode.CodeActionProvider` with
+  three internal helpers exported for unit testing:
+  `buildAddMissingParamFix`, `buildRemoveUnknownParamFix`, `buildFixTypeMismatchFix`,
+  `canonicalLiteralForType`, `findParametersLine`, `findLastParamLine`.
+
+- **New commands** registered (for completeness / keybinding surface):
+  `azure-templates-navigator.quickfix.addMissingParam`,
+  `azure-templates-navigator.quickfix.removeUnknownParam`,
+  `azure-templates-navigator.quickfix.fixTypeMismatch`.
+
+- **47 new unit tests** in `test/unit/quickFixProvider.unit.test.js` covering all
+  helper functions and the three fix builders across a wide range of edge cases
+  (no `parameters:` block, empty block, last line of file, multi-template files,
+  all canonical type literals, etc.).
+
 ## [1.6.0] - 2026-02-19
 
 ### Added
