@@ -144,6 +144,7 @@ const {
   buildAddMissingParamFix,
   buildRemoveUnknownParamFix,
   buildFixTypeMismatchFix,
+  buildRemoveUnusedParamFix,
   canonicalLiteralForType,
   findParametersLine,
   findLastParamLine,
@@ -574,5 +575,166 @@ describe('quickFixProvider.provideCodeActions', () => {
       doc, null, { diagnostics: [diagUnknown, diagType] }
     );
     assert.strictEqual(actions.length, 2);
+  });
+
+  it('returns a remove-unused-param action for unused-param diagnostic', () => {
+    const doc = makeDocument([
+      'parameters:',
+      '  - name: usedParam',
+      '    type: string',
+      '  - name: deadParam',
+      '    type: string',
+      '    default: legacy',
+      'steps:',
+      '  - script: echo ${{ parameters.usedParam }}',
+    ]);
+    const diag = makeDiag(
+      'unused-param',
+      "Parameter 'deadParam' is declared but never referenced in the template body",
+      3  // line of "  - name: deadParam"
+    );
+    diag.source = 'Azure Templates Navigator';
+
+    const actions = quickFixProvider.provideCodeActions(doc, null, { diagnostics: [diag] });
+    assert.strictEqual(actions.length, 1);
+    assert.ok(actions[0].title.includes('deadParam'));
+    assert.ok(actions[0].title.includes('Remove'));
+  });
+});
+
+// ---------------------------------------------------------------------------
+// buildRemoveUnusedParamFix
+// ---------------------------------------------------------------------------
+
+describe('buildRemoveUnusedParamFix', () => {
+
+  it('returns undefined for a non-matching message', () => {
+    const doc  = makeDocument(['  - name: orphan', '    type: string']);
+    const diag = makeDiag('unused-param', 'Something unrelated', 0);
+    const action = buildRemoveUnusedParamFix(doc, diag);
+    assert.strictEqual(action, undefined);
+  });
+
+  it('creates a CodeAction with the correct title and kind', () => {
+    const doc = makeDocument([
+      'parameters:',
+      '  - name: orphan',
+      '    type: string',
+      '    default: old',
+      'steps:',
+      '  - script: echo hello',
+    ]);
+    const diag = makeDiag(
+      'unused-param',
+      "Parameter 'orphan' is declared but never referenced in the template body",
+      1  // line of "  - name: orphan"
+    );
+    const action = buildRemoveUnusedParamFix(doc, diag);
+
+    assert.ok(action, 'Expected a CodeAction');
+    assert.ok(action.title.includes('orphan'), 'Title should mention the param name');
+    assert.ok(action.title.includes('Remove'), 'Title should say Remove');
+    assert.strictEqual(action.kind, CodeActionKind.QuickFix);
+    assert.strictEqual(action.isPreferred, true);
+  });
+
+  it('deletes the name line and all sub-property lines of the parameter entry', () => {
+    // Lines:
+    //   0: parameters:
+    //   1:   - name: orphan
+    //   2:     type: string
+    //   3:     default: old
+    //   4: steps:
+    //   5:   - script: echo hello
+    const doc = makeDocument([
+      'parameters:',
+      '  - name: orphan',
+      '    type: string',
+      '    default: old',
+      'steps:',
+      '  - script: echo hello',
+    ]);
+    const diag = makeDiag(
+      'unused-param',
+      "Parameter 'orphan' is declared but never referenced in the template body",
+      1
+    );
+    const action = buildRemoveUnusedParamFix(doc, diag);
+
+    assert.ok(action);
+    const edit = action.edit;
+    assert.ok(edit instanceof FakeWorkspaceEdit);
+    assert.strictEqual(edit._deletes.length, 1);
+
+    const del = edit._deletes[0];
+    // Should start at line 1 (the "- name: orphan" line)
+    assert.strictEqual(del.range.start.line, 1);
+    // Should end at line 4 (start of "steps:" — i.e. one past the last sub-property)
+    assert.strictEqual(del.range.end.line, 4);
+  });
+
+  it('deletes only the single-line entry when there are no sub-properties', () => {
+    // Lines:
+    //   0: parameters:
+    //   1:   - name: orphan
+    //   2:   - name: used
+    //   3:     type: string
+    //   4: steps:
+    //   5:   - script: echo ${{ parameters.used }}
+    const doc = makeDocument([
+      'parameters:',
+      '  - name: orphan',
+      '  - name: used',
+      '    type: string',
+      'steps:',
+      '  - script: echo ${{ parameters.used }}',
+    ]);
+    const diag = makeDiag(
+      'unused-param',
+      "Parameter 'orphan' is declared but never referenced in the template body",
+      1
+    );
+    const action = buildRemoveUnusedParamFix(doc, diag);
+
+    assert.ok(action);
+    const del = action.edit._deletes[0];
+    // "  - name: orphan" is line 1; next sibling "  - name: used" is at same indent → endLine = 1
+    // Delete range: line 1 col 0 → line 2 col 0
+    assert.strictEqual(del.range.start.line, 1);
+    assert.strictEqual(del.range.end.line, 2);
+  });
+
+  it('handles deletion of the last parameter (last lines in file)', () => {
+    const doc = makeDocument([
+      'parameters:',
+      '  - name: orphan',
+      '    type: string',
+    ]);
+    const diag = makeDiag(
+      'unused-param',
+      "Parameter 'orphan' is declared but never referenced in the template body",
+      1
+    );
+    const action = buildRemoveUnusedParamFix(doc, diag);
+    assert.ok(action, 'Expected a CodeAction even for last-line deletion');
+    assert.strictEqual(action.edit._deletes.length, 1);
+  });
+
+  it('sets action.diagnostics to the triggering diagnostic', () => {
+    const doc = makeDocument([
+      'parameters:',
+      '  - name: orphan',
+      '    type: string',
+      'steps:',
+      '  - script: echo hello',
+    ]);
+    const diag = makeDiag(
+      'unused-param',
+      "Parameter 'orphan' is declared but never referenced in the template body",
+      1
+    );
+    const action = buildRemoveUnusedParamFix(doc, diag);
+    assert.ok(action);
+    assert.deepStrictEqual(action.diagnostics, [diag]);
   });
 });

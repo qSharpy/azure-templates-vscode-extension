@@ -1,0 +1,31 @@
+# Example template that demonstrates the "Unused Parameter" diagnostic.
+#
+# After a refactoring, 'legacyTimeout' and 'debugMode' were left behind —
+# they are declared in the parameters block but never referenced in the body.
+# The Azure Templates Navigator extension will flag them with a Warning and
+# offer a "Remove unused parameter declaration" quick-fix.
+
+parameters:
+  # REQUIRED — still used
+  - name: environment
+    type: string
+  # REQUIRED — still used
+  - name: appName
+    type: string
+  # Optional — still used
+  - name: region
+    type: string
+    default: 'westeurope'
+  # ⚠ UNUSED — was removed from the script but the declaration was left behind
+  - name: legacyTimeout
+    type: number
+    default: 30
+  # ⚠ UNUSED — debug flag that is no longer referenced anywhere
+  - name: debugMode
+    type: boolean
+    default: false
+
+steps:
+  - script: |
+      echo "Deploying ${{ parameters.appName }} to ${{ parameters.environment }} (${{ parameters.region }})"
+    displayName: 'Deploy ${{ parameters.appName }}'

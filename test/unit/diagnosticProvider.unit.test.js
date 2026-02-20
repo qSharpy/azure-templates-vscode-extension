@@ -98,6 +98,8 @@ const {
   getDiagnosticsForDocument,
   getDiagnosticsForFile,
   validateCallSite,
+  getUnusedParameterDiagnostics,
+  collectParameterReferences,
 } = require('../../diagnosticProvider');
 
 Module._load = _orig;
@@ -368,5 +370,264 @@ describe('getDiagnosticsForFile', () => {
     // already covered by getDiagnosticsForDocument tests above).
     const diags = getDiagnosticsForFile(CURRENT_FILE);
     assert.ok(Array.isArray(diags), 'Expected an array of diagnostics');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// collectParameterReferences
+// ---------------------------------------------------------------------------
+
+describe('collectParameterReferences', () => {
+
+  it('finds ${{ parameters.name }} references', () => {
+    const text = 'script: echo ${{ parameters.myParam }}';
+    const refs = collectParameterReferences(text);
+    assert.ok(refs.has('myParam'), 'Expected myParam to be found');
+  });
+
+  it('finds bare parameters.name references inside if-expressions', () => {
+    const text = '${{ if eq(parameters.enabled, true) }}:';
+    const refs = collectParameterReferences(text);
+    assert.ok(refs.has('enabled'), 'Expected enabled to be found');
+  });
+
+  it('finds ${{ parameters["name"] }} bracket-notation references', () => {
+    const text = 'value: ${{ parameters["myKey"] }}';
+    const refs = collectParameterReferences(text);
+    assert.ok(refs.has('myKey'), 'Expected myKey to be found');
+  });
+
+  it('finds ${{ parameters[\'name\'] }} single-quote bracket references', () => {
+    const text = "value: ${{ parameters['myKey'] }}";
+    const refs = collectParameterReferences(text);
+    assert.ok(refs.has('myKey'), 'Expected myKey to be found');
+  });
+
+  it('returns an empty set when there are no parameter references', () => {
+    const text = 'steps:\n  - script: echo hello\n';
+    const refs = collectParameterReferences(text);
+    assert.strictEqual(refs.size, 0);
+  });
+
+  it('collects multiple distinct references', () => {
+    const text = [
+      'script: echo ${{ parameters.env }} ${{ parameters.region }}',
+      '${{ if eq(parameters.debug, true) }}:',
+    ].join('\n');
+    const refs = collectParameterReferences(text);
+    assert.ok(refs.has('env'));
+    assert.ok(refs.has('region'));
+    assert.ok(refs.has('debug'));
+    assert.strictEqual(refs.size, 3);
+  });
+
+  it('does not double-count the same parameter referenced multiple times', () => {
+    const text = [
+      'echo ${{ parameters.env }}',
+      'echo ${{ parameters.env }}',
+    ].join('\n');
+    const refs = collectParameterReferences(text);
+    assert.strictEqual(refs.size, 1);
+    assert.ok(refs.has('env'));
+  });
+});
+
+// ---------------------------------------------------------------------------
+// getUnusedParameterDiagnostics
+// ---------------------------------------------------------------------------
+
+describe('getUnusedParameterDiagnostics', () => {
+
+  const FAKE_PATH = '/fake/template.yml';
+
+  it('returns [] when all declared parameters are referenced', () => {
+    const text = [
+      'parameters:',
+      '  - name: environment',
+      '    type: string',
+      '  - name: region',
+      '    type: string',
+      '    default: eastus',
+      'steps:',
+      '  - script: echo ${{ parameters.environment }} ${{ parameters.region }}',
+    ].join('\n');
+    const diags = getUnusedParameterDiagnostics(text, FAKE_PATH);
+    assert.deepStrictEqual(diags, []);
+  });
+
+  it('returns [] when there are no declared parameters', () => {
+    const text = 'steps:\n  - script: echo hello\n';
+    const diags = getUnusedParameterDiagnostics(text, FAKE_PATH);
+    assert.deepStrictEqual(diags, []);
+  });
+
+  it('emits a Warning diagnostic for each unreferenced parameter', () => {
+    const text = [
+      'parameters:',
+      '  - name: usedParam',
+      '    type: string',
+      '  - name: unusedParam',
+      '    type: string',
+      '    default: legacy',
+      'steps:',
+      '  - script: echo ${{ parameters.usedParam }}',
+    ].join('\n');
+    const diags = getUnusedParameterDiagnostics(text, FAKE_PATH);
+    assert.strictEqual(diags.length, 1, 'Expected exactly one unused-param diagnostic');
+    const d = diags[0];
+    assert.strictEqual(d.code, 'unused-param');
+    assert.strictEqual(d.severity, 1); // DiagnosticSeverity.Warning
+    assert.ok(d.message.includes('unusedParam'));
+    assert.strictEqual(d.source, 'Azure Templates Navigator');
+  });
+
+  it('emits diagnostics for multiple unreferenced parameters', () => {
+    const text = [
+      'parameters:',
+      '  - name: alpha',
+      '    type: string',
+      '  - name: beta',
+      '    type: string',
+      '  - name: gamma',
+      '    type: string',
+      'steps:',
+      '  - script: echo ${{ parameters.alpha }}',
+    ].join('\n');
+    const diags = getUnusedParameterDiagnostics(text, FAKE_PATH);
+    assert.strictEqual(diags.length, 2);
+    const names = diags.map(d => {
+      const m = /Parameter '([\w-]+)'/.exec(d.message);
+      return m ? m[1] : '';
+    });
+    assert.ok(names.includes('beta'));
+    assert.ok(names.includes('gamma'));
+  });
+
+  it('detects references inside if-expressions (bare parameters.name)', () => {
+    const text = [
+      'parameters:',
+      '  - name: runTests',
+      '    type: boolean',
+      '    default: true',
+      'steps:',
+      '  - ${{ if eq(parameters.runTests, true) }}:',
+      '    - script: npm test',
+    ].join('\n');
+    const diags = getUnusedParameterDiagnostics(text, FAKE_PATH);
+    assert.deepStrictEqual(diags, [], 'runTests is referenced in if-expression — should not be flagged');
+  });
+
+  it('diagnostic range points at the parameter name on its declaration line', () => {
+    const text = [
+      'parameters:',
+      '  - name: orphan',
+      '    type: string',
+      'steps:',
+      '  - script: echo hello',
+    ].join('\n');
+    const diags = getUnusedParameterDiagnostics(text, FAKE_PATH);
+    assert.strictEqual(diags.length, 1);
+    const d = diags[0];
+    // Line 1 is "  - name: orphan" (0-based)
+    assert.strictEqual(d.range.start.line, 1);
+    // The range should cover the word "orphan"
+    const lineText = '  - name: orphan';
+    const expectedStart = lineText.indexOf('orphan');
+    assert.strictEqual(d.range.start.character, expectedStart);
+    assert.strictEqual(d.range.end.character, expectedStart + 'orphan'.length);
+  });
+
+  it('does not flag parameters referenced via bracket notation', () => {
+    const text = [
+      'parameters:',
+      '  - name: myKey',
+      '    type: string',
+      'steps:',
+      "  - script: echo ${{ parameters['myKey'] }}",
+    ].join('\n');
+    const diags = getUnusedParameterDiagnostics(text, FAKE_PATH);
+    assert.deepStrictEqual(diags, []);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// getDiagnosticsForDocument — unused-param integration
+// ---------------------------------------------------------------------------
+
+describe('getDiagnosticsForDocument (unused-param integration)', () => {
+
+  function makeDoc(text, fsPath = CURRENT_FILE) {
+    return { getText: () => text, uri: { fsPath }, languageId: 'yaml' };
+  }
+
+  it('emits unused-param warnings for a template with unreferenced parameters', () => {
+    const text = [
+      'parameters:',
+      '  - name: usedParam',
+      '    type: string',
+      '  - name: deadParam',
+      '    type: string',
+      '    default: old-value',
+      'steps:',
+      '  - script: echo ${{ parameters.usedParam }}',
+    ].join('\n');
+    const doc = makeDoc(text, '/fake/my-template.yml');
+    const diags = getDiagnosticsForDocument(doc);
+    const unused = diags.filter(d => d.code === 'unused-param');
+    assert.strictEqual(unused.length, 1);
+    assert.ok(unused[0].message.includes('deadParam'));
+    assert.strictEqual(unused[0].severity, 1); // Warning
+  });
+
+  it('emits no unused-param warnings when all parameters are referenced', () => {
+    const text = [
+      'parameters:',
+      '  - name: env',
+      '    type: string',
+      'steps:',
+      '  - script: echo ${{ parameters.env }}',
+    ].join('\n');
+    const doc = makeDoc(text, '/fake/my-template.yml');
+    const diags = getDiagnosticsForDocument(doc);
+    const unused = diags.filter(d => d.code === 'unused-param');
+    assert.deepStrictEqual(unused, []);
+  });
+
+  it('does not emit unused-param warnings for documents with no parameters: block', () => {
+    const text = 'stages:\n  - stage: Build\n    jobs: []\n';
+    const doc = makeDoc(text, '/fake/pipeline.yml');
+    const diags = getDiagnosticsForDocument(doc);
+    const unused = diags.filter(d => d.code === 'unused-param');
+    assert.deepStrictEqual(unused, []);
+  });
+
+  it('emits both caller-side and template-side diagnostics in the same document', () => {
+    // A pipeline that both calls a template (caller-side) AND declares its own
+    // parameters with one unused (template-side).
+    const text = [
+      'parameters:',
+      '  - name: activeParam',
+      '    type: string',
+      '  - name: staleParam',
+      '    type: string',
+      '    default: legacy',
+      'steps:',
+      '  - script: echo ${{ parameters.activeParam }}',
+      '  - template: ../templates/local-template.yml',
+      '    parameters:',
+      '      region: eastus',
+      // missing required "environment" → caller-side error
+    ].join('\n');
+    const doc = makeDoc(text);
+    const diags = getDiagnosticsForDocument(doc);
+
+    const unused  = diags.filter(d => d.code === 'unused-param');
+    const missing = diags.filter(d => d.code === 'missing-required-param');
+
+    assert.strictEqual(unused.length, 1, 'Expected one unused-param warning');
+    assert.ok(unused[0].message.includes('staleParam'));
+
+    assert.ok(missing.length >= 1, 'Expected at least one missing-required-param error');
+    assert.ok(missing[0].message.includes('environment'));
   });
 });

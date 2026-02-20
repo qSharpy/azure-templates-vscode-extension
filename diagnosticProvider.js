@@ -9,6 +9,94 @@ const {
   resolveTemplatePath,
 } = require('./hoverProvider');
 
+// ─────────────────────────────────────────────────────────────────────────────
+// Unused-parameter detection (template-side inspection)
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Returns the set of parameter names that are actually referenced in the
+ * template body via `${{ parameters.name }}` (or the shorthand
+ * `${{ parameters['name'] }}`).
+ *
+ * We intentionally scan the *entire* file text so that references inside
+ * multi-line scripts, condition expressions, and nested YAML values are all
+ * captured.
+ *
+ * @param {string} text  Raw template file contents
+ * @returns {Set<string>}
+ */
+function collectParameterReferences(text) {
+  const refs = new Set();
+  // Match both:
+  //   ${{ parameters.name }}
+  //   ${{ parameters['name'] }}  or  ${{ parameters["name"] }}
+  //   parameters.name  (bare, inside if-expressions like eq(parameters.foo, 'x'))
+  const pattern = /\$\{\{[^}]*parameters\.(\w+)[^}]*\}\}|\$\{\{[^}]*parameters\[['"](\w+)['"]\][^}]*\}\}|(?<!\w)parameters\.(\w+)/g;
+  let m;
+  while ((m = pattern.exec(text)) !== null) {
+    const name = m[1] || m[2] || m[3];
+    if (name) refs.add(name);
+  }
+  return refs;
+}
+
+/**
+ * Detects parameters declared in the `parameters:` block of a template file
+ * that are never referenced in the template body.
+ *
+ * Only runs when the file looks like a **template** (i.e. it has a top-level
+ * `parameters:` block but no top-level `trigger:` / `pr:` / `schedules:` /
+ * `stages:` / `jobs:` / `steps:` at the root level that would indicate it is
+ * a pipeline entry-point rather than a reusable template).
+ *
+ * Actually, Azure Pipelines templates *can* have top-level `steps:`, `jobs:`,
+ * or `stages:` — that is exactly what makes them templates.  We therefore
+ * check for `parameters:` at the top level and run the inspection regardless.
+ * Pipeline entry-points that also declare parameters are valid targets too
+ * (they can have unused parameters after refactoring).
+ *
+ * @param {string} text      Raw file contents
+ * @param {string} filePath  Absolute path (used to build diagnostic ranges)
+ * @returns {vscode.Diagnostic[]}
+ */
+function getUnusedParameterDiagnostics(text, filePath) {
+  const diagnostics = [];
+
+  const declared = parseParameters(text);
+  if (declared.length === 0) return diagnostics;
+
+  const refs = collectParameterReferences(text);
+
+  const lines = text.replace(/\r\n/g, '\n').split('\n');
+
+  for (const param of declared) {
+    if (refs.has(param.name)) continue; // referenced — OK
+
+    // Find the exact column of the parameter name on its declaration line.
+    // param.line is the 0-based line of "  - name: <paramName>"
+    const lineText = lines[param.line] || '';
+    const nameIdx = lineText.indexOf(param.name);
+    const startChar = nameIdx >= 0 ? nameIdx : 0;
+    const endChar   = nameIdx >= 0 ? nameIdx + param.name.length : lineText.length;
+
+    const range = new vscode.Range(
+      param.line, startChar,
+      param.line, endChar
+    );
+
+    const diag = new vscode.Diagnostic(
+      range,
+      `Parameter '${param.name}' is declared but never referenced in the template body`,
+      vscode.DiagnosticSeverity.Warning
+    );
+    diag.source = 'Azure Templates Navigator';
+    diag.code   = 'unused-param';
+    diagnostics.push(diag);
+  }
+
+  return diagnostics;
+}
+
 /**
  * Infers the "kind" of a YAML scalar value for basic type-checking.
  *
@@ -171,6 +259,8 @@ function validateCallSite(lines, templateLine, templateRef, currentFile, repoAli
 
 /**
  * Scans an entire YAML document for template call sites and returns all diagnostics.
+ * Also runs the unused-parameter inspection when the document itself is a template
+ * (i.e. it has a top-level `parameters:` block).
  *
  * @param {vscode.TextDocument} document
  * @returns {vscode.Diagnostic[]}
@@ -184,6 +274,7 @@ function getDiagnosticsForDocument(document) {
 
   const allDiagnostics = [];
 
+  // ── Caller-side checks: validate every template call site ─────────────────
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i];
     // Strip YAML line comments before matching to avoid false positives from
@@ -198,6 +289,13 @@ function getDiagnosticsForDocument(document) {
 
     const siteDiagnostics = validateCallSite(lines, i, templateRef, currentFile, repoAliases);
     allDiagnostics.push(...siteDiagnostics);
+  }
+
+  // ── Template-side check: detect unused declared parameters ────────────────
+  // Run whenever the file has a top-level `parameters:` block.
+  if (/^parameters\s*:/m.test(docText)) {
+    const unusedDiags = getUnusedParameterDiagnostics(docText, currentFile);
+    allDiagnostics.push(...unusedDiags);
   }
 
   return allDiagnostics;
@@ -410,4 +508,6 @@ module.exports = {
   scanWorkspace,
   validateCallSite,
   inferValueType,
+  getUnusedParameterDiagnostics,
+  collectParameterReferences,
 };

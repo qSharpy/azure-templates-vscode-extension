@@ -7,6 +7,45 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.8.0] - 2026-02-20
+
+### Added
+
+- **Unused-parameter diagnostic** — the extension now inspects template files
+  for parameters that are declared in the `parameters:` block but never
+  referenced in the template body. Each such parameter is flagged with a
+  `Warning` squiggly (`unused-param`) pointing at the parameter name on its
+  declaration line. References are detected in all forms:
+  `${{ parameters.name }}`, `${{ parameters['name'] }}`,
+  `${{ parameters["name"] }}`, and bare `parameters.name` inside
+  `if`-expressions (e.g. `eq(parameters.runTests, true)`).
+
+- **"Remove unused parameter declaration" quick-fix** — a new one-click
+  `CodeAction` (`buildRemoveUnusedParamFix`) deletes the entire parameter
+  entry block (the `- name:` line plus all its sub-property lines such as
+  `type:`, `default:`, etc.) when an `unused-param` diagnostic is present.
+  The action is marked `isPreferred` so it appears at the top of the
+  lightbulb menu.
+
+- **New sample file `samples/templates/stale-template.yml`** — demonstrates
+  the unused-param diagnostic: two parameters (`legacyTimeout`, `debugMode`)
+  are declared but never referenced, while three others are actively used.
+
+- **27 new unit tests** covering the new functionality:
+  - `collectParameterReferences` suite (7 tests) — dot-notation, bracket
+    notation, bare `parameters.name` in if-expressions, multiple refs,
+    deduplication.
+  - `getUnusedParameterDiagnostics` suite (7 tests) — all-referenced,
+    no-params, single unused, multiple unused, if-expression refs, range
+    accuracy, bracket-notation refs.
+  - `getDiagnosticsForDocument (unused-param integration)` suite (4 tests) —
+    end-to-end integration including mixed caller-side + template-side
+    diagnostics in one document.
+  - `buildRemoveUnusedParamFix` suite (5 tests) — non-matching message,
+    title/kind, multi-line deletion, single-line deletion, last-line edge case.
+  - `quickFixProvider.provideCodeActions` extended (1 test) — routes
+    `unused-param` to the new fix builder.
+
 ## [1.7.1] - 2026-02-20
 
 ### Changed
@@ -351,3 +390,5 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Go to template using window message
 - Required parameters color highlighting
 - Required parameters highlight color is parametrized
+
+[1.8.0]: https://github.com/qSharpy/azure-templates-vscode-extension/compare/v1.7.1...v1.8.0

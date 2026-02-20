@@ -306,6 +306,86 @@ function buildFixTypeMismatchFix(document, diagnostic) {
   return action;
 }
 
+/**
+ * "Remove unused parameter declaration" quick-fix.
+ *
+ * Deletes the entire parameter entry block (the `- name: <param>` line plus
+ * all its sub-property lines such as `type:`, `default:`, etc.) from the
+ * template's top-level `parameters:` block.
+ *
+ * The diagnostic range points at the `- name: <param>` line, so we walk
+ * forward from there to find the end of that parameter's sub-block.
+ *
+ * @param {vscode.TextDocument} document
+ * @param {vscode.Diagnostic}   diagnostic
+ * @returns {vscode.CodeAction | undefined}
+ */
+function buildRemoveUnusedParamFix(document, diagnostic) {
+  // Message: "Parameter 'foo' is declared but never referenced in the template body"
+  const msgMatch = /Parameter '([\w-]+)' is declared but never referenced/.exec(
+    diagnostic.message
+  );
+  if (!msgMatch) return undefined;
+
+  const paramName = msgMatch[1];
+  const startLine = diagnostic.range.start.line;
+
+  // Determine the indentation of the `- name:` line so we know when the
+  // sub-block ends (next line at the same or shallower indent).
+  const nameLineText = document.lineAt(startLine).text;
+  const nameLineIndent = nameLineText.length - nameLineText.trimStart().length;
+
+  // Walk forward to find the last line that belongs to this parameter entry.
+  let endLine = startLine;
+  for (let i = startLine + 1; i < document.lineCount; i++) {
+    const text = document.lineAt(i).text;
+    const stripped = text.trimStart();
+    if (stripped === '') {
+      // Blank lines inside a parameter block are unusual but possible; include
+      // them only if the *next* non-blank line still belongs to this entry.
+      // For simplicity we stop at blank lines — this is safe for well-formatted YAML.
+      break;
+    }
+    const indent = text.length - stripped.length;
+    // A line at the same or shallower indent means we've left this entry.
+    if (indent <= nameLineIndent) break;
+    endLine = i;
+  }
+
+  // Build a delete range that covers from the start of `startLine` to the
+  // start of the line *after* `endLine` (so the newline is removed too).
+  let deleteRange;
+  const lineCount = document.lineCount;
+  if (endLine < lineCount - 1) {
+    deleteRange = new vscode.Range(
+      new vscode.Position(startLine, 0),
+      new vscode.Position(endLine + 1, 0)
+    );
+  } else {
+    // Last line(s) in the file — delete from end of previous line
+    const prevEnd = startLine > 0
+      ? document.lineAt(startLine - 1).text.length
+      : 0;
+    deleteRange = new vscode.Range(
+      new vscode.Position(Math.max(0, startLine - 1), prevEnd),
+      new vscode.Position(endLine, document.lineAt(endLine).text.length)
+    );
+  }
+
+  const edit = new vscode.WorkspaceEdit();
+  edit.delete(document.uri, deleteRange);
+
+  const action = new vscode.CodeAction(
+    `Remove unused parameter declaration '${paramName}'`,
+    vscode.CodeActionKind.QuickFix
+  );
+  action.edit = edit;
+  action.diagnostics = [diagnostic];
+  action.isPreferred = true;
+
+  return action;
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // CodeActionProvider
 // ─────────────────────────────────────────────────────────────────────────────
@@ -344,6 +424,9 @@ const quickFixProvider = {
         case 'type-mismatch':
           action = buildFixTypeMismatchFix(document, diagnostic);
           break;
+        case 'unused-param':
+          action = buildRemoveUnusedParamFix(document, diagnostic);
+          break;
         default:
           break;
       }
@@ -361,6 +444,7 @@ module.exports = {
   buildAddMissingParamFix,
   buildRemoveUnknownParamFix,
   buildFixTypeMismatchFix,
+  buildRemoveUnusedParamFix,
   canonicalLiteralForType,
   findParametersLine,
   findLastParamLine,

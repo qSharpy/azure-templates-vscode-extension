@@ -20,10 +20,11 @@ Hover over any `- template:` line to see a tooltip with all parameters declared 
 
 ### 🔴 Parameter Validation Diagnostics
 ![Parameter Validation Diagnostics](images/8.png)
-Real-time squiggly-line diagnostics on every template call site:
-- **Error** — missing a required parameter
-- **Warning** — passing an unknown parameter not declared in the template
-- **Warning** — type mismatch (e.g. passing `'yes'` to a `boolean` parameter)
+Real-time squiggly-line diagnostics on every template call site **and** inside template files themselves:
+- **Error** — missing a required parameter (call-site)
+- **Warning** — passing an unknown parameter not declared in the template (call-site)
+- **Warning** — type mismatch (e.g. passing `'yes'` to a `boolean` parameter) (call-site)
+- **Warning** — parameter declared in the template `parameters:` block but never referenced in the template body (`unused-param`)
 
 Diagnostics update automatically as you type (debounced 500ms).
 
@@ -99,17 +100,15 @@ No `npm install` needed at runtime. Works straight from the marketplace.
 
 ### Template Parameter Hover
 
-In your template YAML files, mark required parameters with a `# REQUIRED` comment on the line immediately before the `- name:` entry:
+A parameter is considered **required** when it has no `default:` key — exactly how Azure Pipelines itself treats parameters at runtime. No special comments or annotations are needed.
 
 ```yaml
 parameters:
-  # REQUIRED
-  - name: environment
+  - name: environment        # required — no default:
     type: string
-  # REQUIRED
-  - name: azureSubscription
+  - name: azureSubscription  # required — no default:
     type: string
-  - name: vmImage
+  - name: vmImage            # optional — has a default
     type: string
     default: 'ubuntu-latest'
 ```
@@ -160,9 +159,18 @@ The extension automatically validates every template call site in your pipeline 
 
 ### Quick Fix Actions
 
-When a diagnostic is reported on an unknown parameter, a **Quick Fix** lightbulb appears. Click it (or press `Cmd+.` / `Ctrl+.`) to instantly remove the offending parameter:
+When a diagnostic is reported, a **Quick Fix** lightbulb appears. Click it (or press `Cmd+.` / `Ctrl+.`) to apply a one-click fix:
 
 ![Quick Fix — remove unknown parameter](images/3.png)
+
+| Diagnostic | Quick Fix |
+|---|---|
+| Missing required parameter | **Add missing parameter** — inserts `<paramName>: ` at the correct indentation |
+| Unknown parameter | **Remove unknown parameter** — deletes the offending line |
+| Type mismatch | **Fix type mismatch** — replaces the value with the canonical literal for the expected type |
+| Unused parameter declaration | **Remove unused parameter declaration** — deletes the `- name:` entry and all its sub-properties (`type:`, `default:`, etc.) from the template's `parameters:` block |
+
+All quick fixes are marked as `isPreferred` and appear at the top of the lightbulb menu.
 
 ---
 
