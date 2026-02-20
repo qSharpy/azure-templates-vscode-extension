@@ -13,12 +13,13 @@ const vscode = acquireVsCodeApi();
 let allNodes = [];
 let allEdges = [];
 let simulation = null;
-let filterText = '';
-let currentRootPath = '';   // tracks the active path filter
 let fileScopeEnabled = true; // mirrors _fileScopeEnabled on the extension side
 let scopedFilePath = null;   // the focal file when in file-scope mode
 let showFullPath = false;    // whether to show workspace-relative paths as node labels
-let workspaceRoot = '';      // workspace root path (for display only)
+let graphDepth = 1;          // current BFS depth for file-scope mode (1–10)
+
+/** @type {Array<{filePath:string,filename:string,relativePath:string,directory:string}>} */
+let searchIndex = [];        // all workspace YAML files for the search bar
 
 // ---------------------------------------------------------------------------
 // Colour palette (matches legend in HTML)
@@ -50,24 +51,134 @@ const KIND_STROKE = {
 // ---------------------------------------------------------------------------
 // DOM refs
 // ---------------------------------------------------------------------------
+// ---------------------------------------------------------------------------
+// Search bar
+// ---------------------------------------------------------------------------
+const searchInput   = document.getElementById('search-input');
+const searchResults = document.getElementById('search-results');
+const searchEmpty   = document.getElementById('search-empty');
+
+let searchDebounce = null;
+
+searchInput.addEventListener('input', () => {
+  clearTimeout(searchDebounce);
+  searchDebounce = setTimeout(() => runSearch(searchInput.value), 120);
+});
+
+searchInput.addEventListener('keydown', (e) => {
+  if (e.key === 'ArrowDown') {
+    e.preventDefault();
+    const first = searchResults.querySelector('.sr-item');
+    if (first) first.focus();
+  } else if (e.key === 'Escape') {
+    closeSearch();
+  }
+});
+
+searchResults.addEventListener('keydown', (e) => {
+  const items = [...searchResults.querySelectorAll('.sr-item')];
+  const idx = items.indexOf(document.activeElement);
+  if (e.key === 'ArrowDown') {
+    e.preventDefault();
+    if (idx < items.length - 1) items[idx + 1].focus();
+  } else if (e.key === 'ArrowUp') {
+    e.preventDefault();
+    if (idx > 0) items[idx - 1].focus();
+    else searchInput.focus();
+  } else if (e.key === 'Enter') {
+    e.preventDefault();
+    if (document.activeElement && document.activeElement.dataset.filepath) {
+      openSearchResult(document.activeElement.dataset.filepath);
+    }
+  } else if (e.key === 'Escape') {
+    closeSearch();
+  }
+});
+
+// Close dropdown when clicking outside the search bar
+document.addEventListener('click', (e) => {
+  if (!e.target.closest('#search-bar')) closeSearch();
+});
+
+function runSearch(query) {
+  const q = query.trim().toLowerCase();
+  if (!q) { closeSearch(); return; }
+
+  const hits = searchIndex.filter(item =>
+    item.relativePath.toLowerCase().includes(q) ||
+    item.filename.toLowerCase().includes(q)
+  ).slice(0, 30);
+
+  renderSearchResults(hits);
+}
+
+function renderSearchResults(hits) {
+  // Remove old items (keep the #search-empty sentinel)
+  searchResults.querySelectorAll('.sr-item').forEach(el => el.remove());
+
+  if (hits.length === 0) {
+    searchEmpty.style.display = 'block';
+    searchResults.classList.add('open');
+    return;
+  }
+
+  searchEmpty.style.display = 'none';
+  searchResults.classList.add('open');
+
+  for (const item of hits) {
+    const el = document.createElement('div');
+    el.className = 'sr-item';
+    el.tabIndex = 0;
+    el.dataset.filepath = item.filePath;
+    el.title = item.relativePath;
+
+    const name = document.createElement('div');
+    name.className = 'sr-name';
+    name.textContent = item.filename;
+
+    const dir = document.createElement('div');
+    dir.className = 'sr-path';
+    dir.textContent = item.directory || item.relativePath;
+
+    el.appendChild(name);
+    el.appendChild(dir);
+
+    el.addEventListener('mousedown', (e) => {
+      // Use mousedown so it fires before the blur that would close the dropdown
+      e.preventDefault();
+      openSearchResult(item.filePath);
+    });
+
+    searchResults.appendChild(el);
+  }
+}
+
+function openSearchResult(filePath) {
+  closeSearch();
+  vscode.postMessage({ type: 'openFile', filePath });
+}
+
+function closeSearch() {
+  searchResults.classList.remove('open');
+  searchInput.value = '';
+}
+
+// ---------------------------------------------------------------------------
+// DOM refs (graph)
+// ---------------------------------------------------------------------------
 const svgEl          = document.getElementById('svg');
 const zoomLayer      = document.getElementById('zoom-layer');
 const edgesLayer     = document.getElementById('edges-layer');
 const edgeLabels     = document.getElementById('edge-labels-layer');
 const nodesLayer     = document.getElementById('nodes-layer');
-const tooltip        = document.getElementById('tooltip');
 const ctxMenu        = document.getElementById('ctx-menu');
 const emptyState     = document.getElementById('empty-state');
-const statsEl        = document.getElementById('stats');
-const searchInput    = document.getElementById('search');
-const btnClearSearch = document.getElementById('btn-clear-search');
-const pathBar        = document.getElementById('path-bar');
-const btnTogglePath  = document.getElementById('btn-toggle-path');
 const btnFileScope   = document.getElementById('btn-file-scope');
 const btnFullPath    = document.getElementById('btn-full-path');
-const rootPathInput  = document.getElementById('root-path');
-const btnApplyPath   = document.getElementById('btn-apply-path');
-const btnClearPath   = document.getElementById('btn-clear-path');
+const depthControls  = document.getElementById('depth-controls');
+const depthValue     = document.getElementById('depth-value');
+const btnDepthDec    = document.getElementById('btn-depth-dec');
+const btnDepthInc    = document.getElementById('btn-depth-inc');
 
 const svg = d3.select(svgEl);
 
@@ -92,22 +203,7 @@ document.getElementById('legend-toggle').addEventListener('click', () => {
 // ---------------------------------------------------------------------------
 // Toolbar buttons
 // ---------------------------------------------------------------------------
-document.getElementById('btn-refresh').addEventListener('click', () => {
-  vscode.postMessage({ type: 'ready' });
-});
-
 document.getElementById('btn-fit').addEventListener('click', fitView);
-
-document.getElementById('btn-reset').addEventListener('click', () => {
-  allNodes.forEach(n => { n.fx = null; n.fy = null; });
-  if (simulation) {
-    simulation.alpha(0.8).restart();
-  }
-});
-
-document.getElementById('btn-expand').addEventListener('click', () => {
-  vscode.postMessage({ type: 'expand' });
-});
 
 // ---------------------------------------------------------------------------
 // File-scope toggle button
@@ -119,9 +215,11 @@ document.getElementById('btn-expand').addEventListener('click', () => {
 function updateFileScopeButton() {
   if (fileScopeEnabled) {
     btnFileScope.classList.add('active');
+    btnFileScope.textContent = '📄 File';
     btnFileScope.title = 'Showing current file only — click to show full workspace graph';
   } else {
     btnFileScope.classList.remove('active');
+    btnFileScope.textContent = '📄 Workspace';
     btnFileScope.title = 'Scope graph to the currently open file (shows parent + direct children only)';
   }
 }
@@ -129,7 +227,41 @@ function updateFileScopeButton() {
 btnFileScope.addEventListener('click', () => {
   fileScopeEnabled = !fileScopeEnabled;
   updateFileScopeButton();
+  updateDepthControls();
   vscode.postMessage({ type: 'setFileScope', enabled: fileScopeEnabled });
+});
+
+// ---------------------------------------------------------------------------
+// Depth controls (file-scope mode only)
+// ---------------------------------------------------------------------------
+
+/**
+ * Updates the depth controls UI to reflect the current `graphDepth` value
+ * and shows/hides the controls based on whether file-scope mode is active.
+ */
+function updateDepthControls() {
+  if (fileScopeEnabled) {
+    depthControls.classList.add('visible');
+  } else {
+    depthControls.classList.remove('visible');
+  }
+  depthValue.textContent = String(graphDepth);
+  btnDepthDec.disabled = graphDepth <= 1;
+  btnDepthInc.disabled = graphDepth >= 10;
+}
+
+btnDepthDec.addEventListener('click', () => {
+  if (graphDepth <= 1) return;
+  graphDepth--;
+  updateDepthControls();
+  vscode.postMessage({ type: 'setDepth', depth: graphDepth });
+});
+
+btnDepthInc.addEventListener('click', () => {
+  if (graphDepth >= 10) return;
+  graphDepth++;
+  updateDepthControls();
+  vscode.postMessage({ type: 'setDepth', depth: graphDepth });
 });
 
 // ---------------------------------------------------------------------------
@@ -175,87 +307,6 @@ function updateNodeLabels() {
   d3.select(nodesLayer).selectAll('g.node').select('text:last-of-type')
     .text(d => truncate(nodeLabel(d), showFullPath ? 40 : 24));
 }
-
-searchInput.addEventListener('input', () => {
-  filterText = searchInput.value.trim().toLowerCase();
-  btnClearSearch.classList.toggle('visible', filterText.length > 0);
-  applyFilter();
-});
-
-btnClearSearch.addEventListener('click', () => {
-  searchInput.value = '';
-  filterText = '';
-  btnClearSearch.classList.remove('visible');
-  applyFilter();
-  searchInput.focus();
-});
-
-// ---------------------------------------------------------------------------
-// Path toggle button
-// ---------------------------------------------------------------------------
-
-btnTogglePath.addEventListener('click', () => {
-  const isOpen = pathBar.classList.toggle('open');
-  btnTogglePath.classList.toggle('active', isOpen);
-  if (isOpen) {
-    rootPathInput.focus();
-  }
-});
-
-// ---------------------------------------------------------------------------
-// Path filter bar
-// ---------------------------------------------------------------------------
-
-/**
- * Sends a setRootPath message to the extension host and triggers a graph
- * rebuild with the new sub-directory.
- * @param {string} newPath
- */
-function applyRootPath(newPath) {
-  const trimmed = newPath.trim();
-  currentRootPath = trimmed;
-  updatePathInputStyle();
-  vscode.postMessage({ type: 'setRootPath', rootPath: trimmed });
-}
-
-function updatePathInputStyle() {
-  if (currentRootPath) {
-    rootPathInput.classList.add('has-value');
-    btnTogglePath.classList.add('has-path');
-  } else {
-    rootPathInput.classList.remove('has-value');
-    btnTogglePath.classList.remove('has-path');
-  }
-}
-
-btnApplyPath.addEventListener('click', () => {
-  applyRootPath(rootPathInput.value);
-  // Collapse the path bar after applying
-  pathBar.classList.remove('open');
-  btnTogglePath.classList.remove('active');
-});
-
-// Apply on Enter key inside the path input
-rootPathInput.addEventListener('keydown', (e) => {
-  if (e.key === 'Enter') {
-    applyRootPath(rootPathInput.value);
-    // Collapse the path bar after applying
-    pathBar.classList.remove('open');
-    btnTogglePath.classList.remove('active');
-  }
-  if (e.key === 'Escape') {
-    pathBar.classList.remove('open');
-    btnTogglePath.classList.remove('active');
-  }
-});
-
-btnClearPath.addEventListener('click', () => {
-  rootPathInput.value = '';
-  applyRootPath('');
-  // Collapse the path bar after clearing
-  pathBar.classList.remove('open');
-  btnTogglePath.classList.remove('active');
-});
 
 // ---------------------------------------------------------------------------
 // Context menu — dismiss on outside click or Escape
@@ -324,6 +375,11 @@ function hideCtxMenu() {
 window.addEventListener('message', (event) => {
   const msg = event.data;
   switch (msg.type) {
+    case 'searchData':
+      // Receive the full file list for client-side search filtering
+      searchIndex = msg.items || [];
+      break;
+
     case 'graphData':
       // Sync file-scope state from the extension (e.g. on first load)
       if (typeof msg.fileScopeEnabled === 'boolean' && msg.fileScopeEnabled !== fileScopeEnabled) {
@@ -331,18 +387,11 @@ window.addEventListener('message', (event) => {
         updateFileScopeButton();
       }
 
-      // Sync the path input with whatever the extension used (e.g. from the
-      // persisted workspace setting on first load).
-      if (typeof msg.rootPath === 'string' && msg.rootPath !== rootPathInput.value) {
-        rootPathInput.value = msg.rootPath;
-        currentRootPath = msg.rootPath;
-        updatePathInputStyle();
+      // Sync depth from the extension (e.g. on first load or panel open)
+      if (typeof msg.graphDepth === 'number' && msg.graphDepth !== graphDepth) {
+        graphDepth = msg.graphDepth;
       }
-
-      // Store workspace root for full-path display
-      if (typeof msg.workspaceRoot === 'string') {
-        workspaceRoot = msg.workspaceRoot;
-      }
+      updateDepthControls();
 
       // Track the focal file for upstream/downstream colouring
       scopedFilePath = msg.scopedFile || null;
@@ -498,20 +547,6 @@ function renderGraph(nodes, edges, scopedFile) {
   allNodes = nodes.map(n => Object.assign({}, n));
   allEdges = edges.map(e => Object.assign({}, e));
 
-  // Count upstream / downstream edges for the stats bar
-  const upstreamCount   = allEdges.filter(e => e.direction === 'upstream').length;
-  const downstreamCount = allEdges.filter(e => e.direction === 'downstream').length;
-
-  if (scopedFile) {
-    const fname = scopedFile.replace(/\\/g, '/').split('/').pop();
-    let statParts = [`📄 ${fname}`, `${nodes.length} nodes`];
-    if (downstreamCount > 0) statParts.push(`↓ ${downstreamCount} downstream`);
-    if (upstreamCount   > 0) statParts.push(`↑ ${upstreamCount} upstream`);
-    statsEl.textContent = statParts.join(' · ');
-  } else {
-    statsEl.textContent = `${nodes.length} files · ${edges.length} refs`;
-  }
-
   // Clear previous render
   d3.select(edgesLayer).selectAll('*').remove();
   d3.select(edgeLabels).selectAll('*').remove();
@@ -564,8 +599,8 @@ function renderGraph(nodes, edges, scopedFile) {
       const l = layerMap.get(d.id) ?? 0;
       return topPad + l * layerGap;
     }).strength(0.6))
-    // Slow cooling so nodes have time to fully separate before freezing
-    .alphaDecay(0.01)
+    // Faster cooling — nodes settle in ~1 s instead of ~5 s
+    .alphaDecay(0.04)
     .velocityDecay(0.35)
     .on('tick', ticked);
 
@@ -664,14 +699,9 @@ function renderGraph(nodes, edges, scopedFile) {
       if (simulation) simulation.alpha(0.3).restart();
     })
     .on('mouseover', (event, d) => {
-      showTooltip(event, d);
       highlightNeighbours(d, edgeSel, nodeGroup);
     })
-    .on('mousemove', (event) => {
-      moveTooltip(event);
-    })
     .on('mouseout', () => {
-      hideTooltip();
       resetHighlight(edgeSel, nodeGroup);
     });
 
@@ -696,10 +726,8 @@ function renderGraph(nodes, edges, scopedFile) {
     nodeGroup.attr('transform', d => `translate(${d.x},${d.y})`);
   }
 
-  // Apply any active filter
-  applyFilter();
-
-  // Auto-fit after simulation settles
+  // Fit early (nodes are roughly in place after ~800 ms) and again when fully settled
+  setTimeout(() => fitView(), 800);
   simulation.on('end', () => fitView());
 }
 
@@ -757,35 +785,6 @@ function resetHighlight(edgeSel, nodeGroup) {
 }
 
 // ---------------------------------------------------------------------------
-// Filter
-// ---------------------------------------------------------------------------
-function applyFilter() {
-  if (!filterText) {
-    d3.select(nodesLayer).selectAll('g.node').style('opacity', 1);
-    d3.select(edgesLayer).selectAll('line').style('opacity', 0.6);
-    return;
-  }
-
-  const matchedIds = new Set(
-    allNodes
-      .filter(n => n.label.toLowerCase().includes(filterText) ||
-                   (n.relativePath && n.relativePath.toLowerCase().includes(filterText)) ||
-                   (n.repoName && n.repoName.toLowerCase().includes(filterText)))
-      .map(n => n.id)
-  );
-
-  d3.select(nodesLayer).selectAll('g.node')
-    .style('opacity', d => matchedIds.has(d.id) ? 1 : 0.1);
-
-  d3.select(edgesLayer).selectAll('line')
-    .style('opacity', e => {
-      const sid = typeof e.source === 'object' ? e.source.id : e.source;
-      const tid = typeof e.target === 'object' ? e.target.id : e.target;
-      return (matchedIds.has(sid) || matchedIds.has(tid)) ? 0.6 : 0.05;
-    });
-}
-
-// ---------------------------------------------------------------------------
 // Fit view
 // ---------------------------------------------------------------------------
 function fitView() {
@@ -818,71 +817,6 @@ function fitView() {
 }
 
 // ---------------------------------------------------------------------------
-// Tooltip
-// ---------------------------------------------------------------------------
-function showTooltip(event, d) {
-  let html = `<strong>${d.label}</strong>`;
-
-  if (d.kind === 'pipeline') html += `<br><span style="color:#4e9de0">● Pipeline root</span>`;
-  else if (d.kind === 'external') html += `<br><span style="color:#9b6fd4">🔗 External — @${d.repoName || ''}</span>`;
-  else if (d.kind === 'missing')  html += `<br><span style="color:#e05c5c">⚠ File not found</span>`;
-  else if (d.kind === 'unknown')  html += `<br><span style="color:#e09a3d">? Unknown alias @${d.alias || ''}</span>`;
-
-  // Show upstream / downstream role when in file-scope mode
-  if (scopedFilePath && d.filePath) {
-    if (d.filePath === scopedFilePath) {
-      html += `<br><span style="color:var(--vscode-focusBorder,#007fd4)">◎ Focal file</span>`;
-    } else {
-      // Determine role from edges
-      const isUpstream   = allEdges.some(e => {
-        const sid = typeof e.source === 'object' ? e.source.id : e.source;
-        return e.direction === 'upstream' && sid === d.filePath;
-      });
-      const isDownstream = allEdges.some(e => {
-        const tid = typeof e.target === 'object' ? e.target.id : e.target;
-        return e.direction === 'downstream' && tid === d.filePath;
-      });
-      if (isUpstream)   html += `<br><span style="color:#e09a3d">↑ Upstream caller</span>`;
-      if (isDownstream) html += `<br><span style="color:#4e9de0">↓ Downstream dependency</span>`;
-    }
-  }
-
-  if (d.filePath) html += `<br><small style="opacity:0.7">${d.filePath}</small>`;
-
-  if (d.paramCount > 0) {
-    html += `<br>${d.paramCount} param${d.paramCount !== 1 ? 's' : ''}`;
-    if (d.requiredCount > 0) html += ` · <span style="color:#e09a3d">${d.requiredCount} required</span>`;
-  }
-
-  if (d.kind !== 'missing' && d.kind !== 'unknown' && d.filePath) {
-    html += `<br><small style="opacity:0.5">Click to open · Right-click for options</small>`;
-  }
-
-  tooltip.innerHTML = html;
-  tooltip.style.display = 'block';
-  moveTooltip(event);
-}
-
-function moveTooltip(event) {
-  const container = document.getElementById('graph-container');
-  const rect = container.getBoundingClientRect();
-  let x = event.clientX - rect.left + 12;
-  let y = event.clientY - rect.top  + 12;
-
-  const tw = tooltip.offsetWidth  || 200;
-  const th = tooltip.offsetHeight || 80;
-  if (x + tw > rect.width  - 8) x = event.clientX - rect.left - tw - 12;
-  if (y + th > rect.height - 8) y = event.clientY - rect.top  - th - 12;
-
-  tooltip.style.left = `${x}px`;
-  tooltip.style.top  = `${y}px`;
-}
-
-function hideTooltip() {
-  tooltip.style.display = 'none';
-}
-
-// ---------------------------------------------------------------------------
 // Empty state
 // ---------------------------------------------------------------------------
 function showEmpty(msg) {
@@ -890,7 +824,6 @@ function showEmpty(msg) {
   if (msg) {
     emptyState.querySelector('div:last-child').textContent = msg;
   }
-  statsEl.textContent = '';
 }
 
 function hideEmpty() {

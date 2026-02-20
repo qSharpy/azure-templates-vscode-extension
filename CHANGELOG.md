@@ -7,6 +7,37 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.10.0] - 2026-02-20
+
+### Added
+
+- **Template Graph: inline search bar** — a full-width `Search templates…` input now sits
+  permanently above the graph toolbar. Typing filters all workspace YAML files by filename
+  **or full workspace-relative path** (e.g. `api/build/templates.yaml`). Results appear in a
+  floating dropdown that overlays the graph canvas without consuming extra panel space; clicking
+  a result opens the file. Arrow-key navigation and Escape to clear are supported.
+
+### Changed
+
+- **Template Graph: stats bar removed** — the `📄 build-job.yml · depth 1 · 6 nodes · ↓ 4 downstream · ↑ 1 upstream`
+  line that appeared below the toolbar has been removed to reclaim vertical space.
+
+- **Template Graph: node hover tooltip removed** — the popup that appeared when hovering a
+  graph node has been removed. Neighbour highlighting on hover is retained.
+
+- **Template Graph: Full Path button moved to the right** — the `⊞ Full Path` button is now
+  right-aligned in the toolbar (pushed by a flex spacer), keeping Fit and File/Workspace on
+  the left.
+
+- **Template Graph: file-scope button label** — the button now reads `📄 Workspace` when
+  file-scope is off (default secondary style) and `📄 File` (blue/active) when file-scope is on,
+  making the current mode immediately obvious.
+
+- **Template Graph: faster auto-fit** — `alphaDecay` raised from `0.01` to `0.04` so the
+  force simulation settles ~4× faster. An additional `setTimeout(() => fitView(), 800)` fires
+  an early fit at 800 ms so the view snaps into place within ~1 second of switching files,
+  rather than waiting ~5 seconds for the simulation to fully cool.
+
 ## [1.9.0] - 2026-02-20
 
 ### Added
@@ -430,5 +461,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Required parameters color highlighting
 - Required parameters highlight color is parametrized
 
+[1.10.0]: https://github.com/qSharpy/azure-templates-vscode-extension/compare/v1.9.0...v1.10.0
 [1.9.0]: https://github.com/qSharpy/azure-templates-vscode-extension/compare/v1.8.0...v1.9.0
 [1.8.0]: https://github.com/qSharpy/azure-templates-vscode-extension/compare/v1.7.1...v1.8.0

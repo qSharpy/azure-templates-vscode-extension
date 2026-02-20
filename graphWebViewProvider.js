@@ -1,9 +1,11 @@
 'use strict';
 
+const path = require('path');
 const vscode = require('vscode');
 const {
   buildWorkspaceGraph,
   buildFileGraph,
+  collectYamlFiles,
 } = require('./graphDataBuilder');
 
 // ---------------------------------------------------------------------------
@@ -47,6 +49,12 @@ class TemplateGraphProvider {
      * @type {boolean}
      */
     this._fileScopeEnabled = true;
+    /**
+     * Graph depth for file-scope mode (1–10).
+     * Controls how many BFS levels upstream/downstream are rendered.
+     * @type {number}
+     */
+    this._graphDepth = 1;
   }
 
   /**
@@ -63,7 +71,7 @@ class TemplateGraphProvider {
       ],
     };
 
-    webviewView.webview.html = this._getHtmlForWebview(webviewView.webview, { isPanel: false });
+    webviewView.webview.html = this._getHtmlForWebview(webviewView.webview);
 
     // Handle messages from the WebView
     webviewView.webview.onDidReceiveMessage(
@@ -120,7 +128,7 @@ class TemplateGraphProvider {
       }
     );
 
-    panel.webview.html = this._getHtmlForWebview(panel.webview, { isPanel: true });
+    panel.webview.html = this._getHtmlForWebview(panel.webview);
 
     panel.webview.onDidReceiveMessage(
       msg => this._handleMessage(msg, panel.webview),
@@ -142,6 +150,16 @@ class TemplateGraphProvider {
       case 'setFileScope': {
         // Toggle file-scope mode on/off from the WebView toolbar button.
         this._fileScopeEnabled = !!msg.enabled;
+        this._sendGraphData(webview);
+        break;
+      }
+
+      case 'setDepth': {
+        // Depth change from the −/+ toolbar buttons in file-scope mode.
+        const d = Number(msg.depth);
+        if (Number.isFinite(d)) {
+          this._graphDepth = Math.max(1, Math.min(10, d));
+        }
         this._sendGraphData(webview);
         break;
       }
@@ -180,6 +198,7 @@ class TemplateGraphProvider {
       case 'ready':
         // WebView signals it has finished initialising — send data now
         this._sendGraphData(webview);
+        this._sendSearchData(webview);
         break;
 
       case 'setRootPath': {
@@ -235,10 +254,10 @@ class TemplateGraphProvider {
 
     const workspaceRoot = workspaceFolders[0].uri.fsPath;
 
-    // ── File-scope mode: show only the active file + its direct children ────
+    // ── File-scope mode: show the active file + BFS up to _graphDepth levels ─
     if (this._fileScopeEnabled && this._activeFile) {
       try {
-        const { nodes, edges } = buildFileGraph(this._activeFile, workspaceRoot);
+        const { nodes, edges } = buildFileGraph(this._activeFile, workspaceRoot, this._graphDepth);
         webview.postMessage({
           type: 'graphData',
           nodes,
@@ -247,6 +266,7 @@ class TemplateGraphProvider {
           workspaceRoot,
           fileScopeEnabled: true,
           scopedFile: this._activeFile,
+          graphDepth: this._graphDepth,
         });
       } catch (err) {
         webview.postMessage({
@@ -280,13 +300,38 @@ class TemplateGraphProvider {
   }
 
   /**
+   * Sends the full list of workspace YAML files to the webview for the search bar.
+   * @private
+   * @param {vscode.Webview} webview
+   */
+  _sendSearchData(webview) {
+    if (!webview) return;
+    const wf = vscode.workspace.workspaceFolders;
+    if (!wf || wf.length === 0) return;
+    const workspaceRoot = wf[0].uri.fsPath;
+    try {
+      const allFiles = collectYamlFiles(workspaceRoot);
+      const items = allFiles.map(fp => {
+        const rel = path.relative(workspaceRoot, fp).replace(/\\/g, '/');
+        const dir = path.dirname(rel).replace(/\\/g, '/');
+        return {
+          filePath: fp,
+          filename: path.basename(fp),
+          relativePath: rel,
+          directory: dir === '.' ? '' : dir,
+        };
+      });
+      webview.postMessage({ type: 'searchData', items });
+    } catch { /* ignore */ }
+  }
+
+  /**
    * Returns the HTML content for the WebView, with a nonce-based CSP.
    * @param {vscode.Webview} webview
-   * @param {{ isPanel: boolean }} options
    * @returns {string}
    * @private
    */
-  _getHtmlForWebview(webview, { isPanel = false } = {}) {
+  _getHtmlForWebview(webview) {
     const nonce = getNonce();
 
     const d3Uri = webview.asWebviewUri(
@@ -295,9 +340,6 @@ class TemplateGraphProvider {
     const graphUri = webview.asWebviewUri(
       vscode.Uri.joinPath(this._context.extensionUri, 'media', 'graph.js')
     );
-
-    // In the full panel the "Expand" button is hidden (already expanded)
-    const expandBtnStyle = isPanel ? 'display:none' : '';
 
     return /* html */`<!DOCTYPE html>
 <html lang="en">
@@ -324,6 +366,80 @@ class TemplateGraphProvider {
       flex-direction: column;
     }
 
+    /* ── Search bar ─────────────────────────────────────────────────────── */
+    #search-bar {
+      padding: 4px 8px;
+      background: var(--vscode-sideBar-background);
+      border-bottom: 1px solid var(--vscode-panel-border);
+      flex-shrink: 0;
+      position: relative;
+    }
+
+    #search-input {
+      width: 100%;
+      background: var(--vscode-input-background);
+      color: var(--vscode-input-foreground);
+      border: 1px solid var(--vscode-input-border, transparent);
+      border-radius: 3px;
+      padding: 3px 8px;
+      font-size: 11px;
+      font-family: inherit;
+      outline: none;
+    }
+    #search-input:focus {
+      border-color: var(--vscode-focusBorder);
+    }
+    #search-input::placeholder {
+      color: var(--vscode-input-placeholderForeground);
+    }
+
+    /* Floating results dropdown — overlays the graph canvas */
+    #search-results {
+      display: none;
+      position: absolute;
+      top: 100%;
+      left: 0;
+      right: 0;
+      background: var(--vscode-editorWidget-background, var(--vscode-sideBar-background));
+      border: 1px solid var(--vscode-panel-border);
+      border-top: none;
+      z-index: 500;
+      max-height: 260px;
+      overflow-y: auto;
+      box-shadow: 0 4px 12px rgba(0,0,0,0.4);
+    }
+    #search-results.open { display: block; }
+
+    .sr-item {
+      display: flex;
+      flex-direction: column;
+      padding: 4px 10px;
+      cursor: pointer;
+      user-select: none;
+    }
+    .sr-item:hover, .sr-item.focused {
+      background: var(--vscode-list-hoverBackground);
+    }
+    .sr-name {
+      font-size: 11px;
+      font-weight: 500;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    .sr-path {
+      font-size: 10px;
+      color: var(--vscode-descriptionForeground);
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    #search-empty {
+      padding: 6px 10px;
+      font-size: 11px;
+      color: var(--vscode-descriptionForeground);
+    }
+
     /* ── Toolbar row 1: action buttons ──────────────────────────────────── */
     #toolbar {
       display: flex;
@@ -333,6 +449,10 @@ class TemplateGraphProvider {
       background: var(--vscode-sideBar-background);
       border-bottom: 1px solid var(--vscode-panel-border);
       flex-shrink: 0;
+    }
+
+    #toolbar-spacer {
+      flex: 1;
     }
 
     #toolbar button {
@@ -348,32 +468,6 @@ class TemplateGraphProvider {
     }
     #toolbar button:hover {
       background: var(--vscode-button-secondaryHoverBackground);
-    }
-
-    /* Path toggle button — highlights when a path is active */
-    #btn-toggle-path {
-      position: relative;
-    }
-    #btn-toggle-path.active {
-      background: var(--vscode-button-background);
-      color: var(--vscode-button-foreground);
-    }
-    #btn-toggle-path.active:hover {
-      background: var(--vscode-button-hoverBackground);
-    }
-    /* Small dot indicator when path is set */
-    #btn-toggle-path .path-dot {
-      display: none;
-      position: absolute;
-      top: 2px;
-      right: 2px;
-      width: 5px;
-      height: 5px;
-      border-radius: 50%;
-      background: var(--vscode-notificationsInfoIcon-foreground, #4e9de0);
-    }
-    #btn-toggle-path.has-path .path-dot {
-      display: block;
     }
 
     /* File-scope toggle button — highlights when file scope is active */
@@ -397,155 +491,50 @@ class TemplateGraphProvider {
     #btn-full-path.active:hover {
       background: var(--vscode-button-hoverBackground);
     }
-#btn-expand {
-  flex-shrink: 0;
-  margin-left: auto;  /* pushes expand button to the right */
-}
 
-
-    /* ── Toolbar row 2: filter (always visible, prominent) ───────────────── */
-    #filter-bar {
-      display: flex;
-      align-items: center;
-      gap: 6px;
-      padding: 4px 8px;
-      background: var(--vscode-sideBar-background);
-      border-bottom: 1px solid var(--vscode-panel-border);
-      flex-shrink: 0;
-    }
-
-    #filter-bar label {
-      font-size: 11px;
-      color: var(--vscode-descriptionForeground);
-      white-space: nowrap;
-      flex-shrink: 0;
-      user-select: none;
-    }
-
-    #search {
-      flex: 1;
-      background: var(--vscode-input-background);
-      color: var(--vscode-input-foreground);
-      border: 1px solid var(--vscode-input-border, transparent);
-      border-radius: 3px;
-      padding: 3px 8px;
-      font-size: 12px;
-      outline: none;
-      transition: border-color 0.15s;
-    }
-    #search:focus {
-      border-color: var(--vscode-focusBorder, #007fd4);
-    }
-    #search::placeholder { color: var(--vscode-input-placeholderForeground); }
-
-    #btn-clear-search {
-      background: transparent;
-      color: var(--vscode-descriptionForeground);
-      border: none;
-      border-radius: 3px;
-      padding: 2px 5px;
-      cursor: pointer;
-      font-size: 12px;
-      flex-shrink: 0;
-      line-height: 1;
-      display: none;
-    }
-    #btn-clear-search:hover {
-      color: var(--vscode-editor-foreground);
-      background: var(--vscode-button-secondaryHoverBackground);
-    }
-    #btn-clear-search.visible { display: block; }
-
-    /* ── Path bar (collapsible, hidden by default) ───────────────────────── */
-    #path-bar {
+    /* Depth controls — only visible in file-scope mode */
+    #depth-controls {
       display: none;
       align-items: center;
-      gap: 5px;
-      padding: 4px 8px;
-      background: var(--vscode-sideBar-background);
-      border-bottom: 1px solid var(--vscode-panel-border);
+      gap: 2px;
       flex-shrink: 0;
     }
-    #path-bar.open {
+    #depth-controls.visible {
       display: flex;
     }
-
-    #root-path-label {
-      font-size: 11px;
-      color: var(--vscode-descriptionForeground);
-      white-space: nowrap;
-      flex-shrink: 0;
-    }
-
-    #root-path {
-      flex: 1;
-      min-width: 60px;
-      background: var(--vscode-input-background);
-      color: var(--vscode-input-foreground);
-      border: 1px solid var(--vscode-input-border, transparent);
-      border-radius: 3px;
-      padding: 3px 7px;
-      font-size: 11px;
-      font-family: var(--vscode-editor-font-family, monospace);
-      outline: none;
-      transition: border-color 0.15s;
-    }
-    #root-path:focus {
-      border-color: var(--vscode-focusBorder, #007fd4);
-    }
-    #root-path::placeholder { color: var(--vscode-input-placeholderForeground); }
-    #root-path.has-value {
-      border-color: var(--vscode-focusBorder, #007fd4);
-    }
-
-    #btn-apply-path {
-      background: var(--vscode-button-background);
-      color: var(--vscode-button-foreground);
-      border: none;
-      border-radius: 3px;
-      padding: 2px 8px;
-      cursor: pointer;
-      font-size: 11px;
-      white-space: nowrap;
-      flex-shrink: 0;
-    }
-    #btn-apply-path:hover {
-      background: var(--vscode-button-hoverBackground);
-    }
-
-    #btn-clear-path {
-      background: transparent;
-      color: var(--vscode-descriptionForeground);
-      border: none;
-      border-radius: 3px;
-      padding: 2px 5px;
-      cursor: pointer;
-      font-size: 12px;
-      flex-shrink: 0;
-      line-height: 1;
-    }
-    #btn-clear-path:hover {
-      color: var(--vscode-editor-foreground);
-      background: var(--vscode-button-secondaryHoverBackground);
-    }
-
-    /* Stats overlay — top-left of the graph canvas */
-    #stats {
-      position: absolute;
-      top: 8px;
-      left: 8px;
+    #depth-controls label {
       font-size: 10px;
       color: var(--vscode-descriptionForeground);
       white-space: nowrap;
-      pointer-events: none;
-      z-index: 10;
-      background: var(--vscode-sideBar-background);
-      border: 1px solid var(--vscode-panel-border);
-      border-radius: 3px;
-      padding: 2px 7px;
-      opacity: 0.85;
+      user-select: none;
+      padding: 0 2px;
     }
-    #stats:empty { display: none; }
+    #depth-controls button {
+      background: var(--vscode-button-secondaryBackground);
+      color: var(--vscode-button-secondaryForeground);
+      border: none;
+      border-radius: 3px;
+      padding: 1px 6px;
+      cursor: pointer;
+      font-size: 13px;
+      line-height: 1.4;
+      flex-shrink: 0;
+    }
+    #depth-controls button:hover {
+      background: var(--vscode-button-secondaryHoverBackground);
+    }
+    #depth-controls button:disabled {
+      opacity: 0.35;
+      cursor: not-allowed;
+    }
+    #depth-value {
+      font-size: 11px;
+      font-weight: 600;
+      min-width: 14px;
+      text-align: center;
+      color: var(--vscode-editor-foreground);
+      user-select: none;
+    }
 
     #graph-container {
       flex: 1;
@@ -557,23 +546,6 @@ class TemplateGraphProvider {
       width: 100%;
       height: 100%;
       display: block;
-    }
-
-    /* Tooltip */
-    #tooltip {
-      position: absolute;
-      background: var(--vscode-editorHoverWidget-background);
-      border: 1px solid var(--vscode-editorHoverWidget-border);
-      color: var(--vscode-editorHoverWidget-foreground);
-      border-radius: 4px;
-      padding: 6px 10px;
-      font-size: 11px;
-      line-height: 1.5;
-      pointer-events: none;
-      max-width: 280px;
-      word-break: break-all;
-      display: none;
-      z-index: 100;
     }
 
     /* Context menu */
@@ -667,34 +639,30 @@ class TemplateGraphProvider {
   </style>
 </head>
 <body>
-  <!-- Row 1: action buttons -->
+  <!-- Search bar: full-width input above the toolbar -->
+  <div id="search-bar">
+    <input id="search-input" type="text" placeholder="Search templates…" autocomplete="off" spellcheck="false" />
+    <div id="search-results">
+      <div id="search-empty" style="display:none">No templates found.</div>
+    </div>
+  </div>
+
+  <!-- Toolbar: Fit · File/Workspace · Depth · [spacer] · Full Path -->
   <div id="toolbar">
-    <button id="btn-refresh" title="Refresh graph">↺ Refresh</button>
-    <button id="btn-fit"     title="Fit graph to view">⊡ Fit</button>
-    <button id="btn-reset"   title="Reset node positions">⟳ Reset</button>
-    <button id="btn-file-scope" title="Scope graph to the currently open file (shows parent + direct children only)" class="active">📄 File</button>
-    <button id="btn-toggle-path" title="Set a sub-directory path to scope the graph">📁 Path<span class="path-dot"></span></button>
-    <button id="btn-full-path" title="Toggle between filename and full workspace-relative path labels">⊞ Full Path</button>
-    <button id="btn-expand" title="Open graph in full editor panel" style="${expandBtnStyle}">⤢ Expand</button>
-  </div>
-
-  <!-- Row 2: filter nodes (always visible, prominent) -->
-  <div id="filter-bar">
-    <label for="search">🔍</label>
-    <input id="search" type="text" placeholder="Filter by filename or @alias…" autocomplete="off">
-    <button id="btn-clear-search" title="Clear filter">✕</button>
-  </div>
-
-  <!-- Row 3: path bar (collapsible, hidden by default) -->
-  <div id="path-bar">
-    <label for="root-path" id="root-path-label">📁</label>
-    <input id="root-path" type="text" placeholder="Sub-directory to scope graph (e.g. templates)" autocomplete="off" spellcheck="false">
-    <button id="btn-apply-path" title="Apply path and rebuild graph">Apply</button>
-    <button id="btn-clear-path" title="Clear path — show entire workspace">✕</button>
+    <button id="btn-fit"        title="Fit graph to view">⊡ Fit</button>
+    <button id="btn-file-scope" title="Scope graph to the currently open file" class="active">📄 File</button>
+    <!-- Depth controls: only shown in file-scope mode -->
+    <div id="depth-controls" title="Graph depth: how many upstream/downstream levels to render (1–10)">
+      <label>Depth</label>
+      <button id="btn-depth-dec" title="Decrease depth">−</button>
+      <span id="depth-value">1</span>
+      <button id="btn-depth-inc" title="Increase depth">+</button>
+    </div>
+    <div id="toolbar-spacer"></div>
+    <button id="btn-full-path"  title="Toggle between filename and full workspace-relative path labels">⊞ Full Path</button>
   </div>
 
   <div id="graph-container">
-    <div id="stats"></div>
     <svg id="svg">
       <defs>
         <marker id="arrow" viewBox="0 -4 10 8" refX="20" refY="0"
@@ -716,7 +684,6 @@ class TemplateGraphProvider {
       </g>
     </svg>
 
-    <div id="tooltip"></div>
     <div id="ctx-menu"></div>
 
     <div id="empty-state">
