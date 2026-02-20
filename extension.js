@@ -44,9 +44,14 @@ function activate(context) {
 
   // ── Diagnostic provider ───────────────────────────────────────────────────
   // Validates template call sites: missing required params, unknown params, type mismatches.
-  // Passes an onDidUpdate callback so the sidebar panel stays in sync.
+  // Passes an onDidUpdate callback so the sidebar panel and dependency tree stay in sync.
+  // treeProvider is declared below but assigned before any async call, so the closure is safe.
+  let treeProvider = null;
   const diagProvider = createDiagnosticProvider(context, {
-    onDidUpdate: (results) => diagPanelProvider.update(results),
+    onDidUpdate: (results) => {
+      diagPanelProvider.update(results);
+      if (treeProvider) treeProvider.setDiagnostics(results);
+    },
   });
 
   // ── Quick-fix provider ────────────────────────────────────────────────────
@@ -75,7 +80,21 @@ function activate(context) {
 
   // ── Tree view provider ────────────────────────────────────────────────────
   // Sidebar panel showing the template dependency tree for the active pipeline file
-  createTreeViewProvider(context);
+  treeProvider = createTreeViewProvider(context);
+
+  // Also listen to VS Code's built-in diagnostics change event so the tree
+  // stays in sync even when diagnostics come from other extensions.
+  context.subscriptions.push(
+    vscode.languages.onDidChangeDiagnostics(() => {
+      const map = new Map();
+      for (const [uri, diags] of vscode.languages.getDiagnostics()) {
+        if (uri.fsPath.match(/\.ya?ml$/i) && diags.length > 0) {
+          map.set(uri.fsPath, [...diags]);
+        }
+      }
+      treeProvider.setDiagnostics(map);
+    })
+  );
 
   // ── Graph view provider ───────────────────────────────────────────────────
   // Sidebar WebView panel showing a force-directed graph of ALL templates in the workspace

@@ -19,13 +19,13 @@ Hover over any `- template:` reference to instantly see its parameters. Get real
 Hover over any `- template:` line to see a tooltip with all parameters declared in the referenced template — their types, default values, and which are required.
 
 ### 🔴 Parameter Validation Diagnostics
-![Parameter Validation Diagnostics](images/8.png)
+![unused param](images/remove-unused-param.gif)
 Real-time squiggly-line diagnostics on every template call site **and** inside template files themselves:
 - **Error** — missing a required parameter (call-site)
 - **Warning** — passing an unknown parameter not declared in the template (call-site)
 - **Warning** — type mismatch (e.g. passing `'yes'` to a `boolean` parameter) (call-site)
 - **Warning** — parameter declared in the template `parameters:` block but never referenced in the template body (`unused-param`)
-
+![Parameter Validation Diagnostics](images/8.png)
 Diagnostics update automatically as you type (debounced 500ms).
 
 ### 💡 IntelliSense Autocomplete

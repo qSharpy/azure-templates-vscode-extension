@@ -7,6 +7,45 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.9.0] - 2026-02-20
+
+### Added
+
+- **Expand / Collapse All toggle** — a new **$(expand-all) Expand / Collapse All** button in the
+  Template Dependencies view title bar expands the entire tree (up to 3 levels deep) with a single
+  click; clicking again collapses all nodes via the built-in `collapseAll` workbench action.
+
+- **Errors Only filter** — a new **$(error) Errors Only** toggle button in the Dependencies view
+  title bar hides all template nodes that have no diagnostics, letting you focus exclusively on
+  files with errors or warnings.
+
+- **Copy current file path** — a new **$(copy) Copy Path** button in the Dependencies view title
+  bar copies the workspace-relative path of the currently active pipeline file to the clipboard.
+  The view title briefly shows `✔ Copied!` as visual confirmation.
+
+- **Diagnostics integration in the tree view** — the Dependencies tree now receives live diagnostic
+  results from the diagnostic provider via a `setDiagnostics()` callback, so error/warning badges
+  on tree nodes update in real time as you type. The extension also subscribes to
+  `vscode.languages.onDidChangeDiagnostics` so the tree stays in sync with diagnostics from other
+  extensions.
+
+### Changed
+
+- **Tree view renamed** — the sidebar panel previously called "Template Dependencies" is now
+  labelled **"Dependencies"** for brevity.
+
+- **`toggleFullPathTree` command title** updated from "Toggle Full Path Labels" to **"Show Full
+  Path"** to match the icon tooltip style of the other toolbar buttons.
+
+- **README: unused-param GIF moved above the diagnostics screenshot** — the animated
+  `remove-unused-param.gif` now appears directly under the *Parameter Validation Diagnostics*
+  heading so readers see the feature in action before the static screenshot.
+
+- **Internal refactor** — `TemplateDependencyProvider` / `TemplateNode` / `getTemplateChildren`
+  renamed to `DependenciesProvider` / `DepNode` / `buildDownstreamNodes` for consistency with the
+  new feature set. All command registrations in `extension.js` converted to the
+  `context.subscriptions.push(vscode.commands.registerCommand(…))` pattern.
+
 ## [1.8.0] - 2026-02-20
 
 ### Added
@@ -391,4 +430,5 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Required parameters color highlighting
 - Required parameters highlight color is parametrized
 
+[1.9.0]: https://github.com/qSharpy/azure-templates-vscode-extension/compare/v1.8.0...v1.9.0
 [1.8.0]: https://github.com/qSharpy/azure-templates-vscode-extension/compare/v1.7.1...v1.8.0

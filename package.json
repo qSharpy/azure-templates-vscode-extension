@@ -2,7 +2,7 @@
   "name": "azure-templates-navigator",
   "displayName": "Azure Templates Navigator",
   "description": "Hover over Azure Pipeline template references to instantly see their parameters. Click to open the template file. Validates parameters, provides IntelliSense autocomplete, variable hover, a template dependency tree view, and an interactive workspace-wide template graph.",
-  "version": "1.8.0",
+  "version": "1.9.0",
   "publisher": "bogdanbujor",
   "icon": "logo.png",
   "repository": {
@@ -118,9 +118,27 @@
       },
       {
         "command": "azure-templates-navigator.toggleFullPathTree",
-        "title": "Toggle Full Path Labels",
+        "title": "Show Full Path",
         "category": "Azure Templates Navigator",
         "icon": "$(symbol-file)"
+      },
+      {
+        "command": "azure-templates-navigator.expandCollapseAll",
+        "title": "Expand / Collapse All",
+        "category": "Azure Templates Navigator",
+        "icon": "$(expand-all)"
+      },
+      {
+        "command": "azure-templates-navigator.toggleErrorsOnly",
+        "title": "Errors Only",
+        "category": "Azure Templates Navigator",
+        "icon": "$(error)"
+      },
+      {
+        "command": "azure-templates-navigator.copyCurrentFilePath",
+        "title": "Copy Path",
+        "category": "Azure Templates Navigator",
+        "icon": "$(copy)"
       },
       {
         "command": "azure-templates-navigator.quickfix.addMissingParam",
@@ -151,9 +169,9 @@
       "azure-templates-navigator": [
         {
           "id": "azure-templates-navigator.templateTree",
-          "name": "Template Dependencies",
+          "name": "Dependencies",
           "contextualTitle": "Azure Templates Navigator",
-          "icon": "$(list-tree)",
+          "icon": "$(type-hierarchy-sub)",
           "visibility": "visible"
         },
         {
@@ -176,14 +194,29 @@
     "menus": {
       "view/title": [
         {
-          "command": "azure-templates-navigator.refreshTemplateTree",
+          "command": "azure-templates-navigator.toggleFullPathTree",
+          "when": "view == azure-templates-navigator.templateTree",
+          "group": "navigation@1"
+        },
+        {
+          "command": "azure-templates-navigator.expandCollapseAll",
           "when": "view == azure-templates-navigator.templateTree",
           "group": "navigation@2"
         },
         {
-          "command": "azure-templates-navigator.toggleFullPathTree",
+          "command": "azure-templates-navigator.toggleErrorsOnly",
           "when": "view == azure-templates-navigator.templateTree",
-          "group": "navigation@1"
+          "group": "navigation@3"
+        },
+        {
+          "command": "azure-templates-navigator.copyCurrentFilePath",
+          "when": "view == azure-templates-navigator.templateTree",
+          "group": "navigation@4"
+        },
+        {
+          "command": "azure-templates-navigator.refreshTemplateTree",
+          "when": "view == azure-templates-navigator.templateTree",
+          "group": "navigation@5"
         },
         {
           "command": "azure-templates-navigator.refreshTemplateGraph",
@@ -199,17 +232,17 @@
       "view/item/context": [
         {
           "command": "azure-templates-navigator.openTemplateBeside",
-          "when": "view == azure-templates-navigator.templateTree && viewItem =~ /^(pipelineRoot|template(Local|External))$/",
+          "when": "view == azure-templates-navigator.templateTree && viewItem =~ /^depFile/",
           "group": "inline@1"
         },
         {
           "command": "azure-templates-navigator.openTemplateBeside",
-          "when": "view == azure-templates-navigator.templateTree && viewItem =~ /^(pipelineRoot|template(Local|External))$/",
+          "when": "view == azure-templates-navigator.templateTree && viewItem =~ /^depFile/",
           "group": "navigation@1"
         },
         {
           "command": "azure-templates-navigator.copyTemplatePath",
-          "when": "view == azure-templates-navigator.templateTree && viewItem =~ /^template/",
+          "when": "view == azure-templates-navigator.templateTree && viewItem =~ /^depFile/",
           "group": "navigation@2"
         }
       ]
