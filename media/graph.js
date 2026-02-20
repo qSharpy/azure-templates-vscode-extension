@@ -440,21 +440,26 @@ function applyHierarchicalPositions(nodes, layerMap, width, height) {
 
   const layers = [...byLayer.keys()].sort((a, b) => a - b);
   const numLayers = layers.length;
-  const layerGap = numLayers > 1 ? (height * 0.85) / (numLayers - 1) : 0;
-  const topPad   = height * 0.075;
+  // Use a minimum of 140px between layers so nodes don't crowd vertically
+  const minLayerGap = 140;
+  const layerGap = numLayers > 1
+    ? Math.max(minLayerGap, (height * 0.85) / (numLayers - 1))
+    : 0;
+  const topPad = height * 0.075;
 
   for (const l of layers) {
     const group = byLayer.get(l);
     const count = group.length;
-    const xGap  = count > 1 ? (width * 0.85) / (count - 1) : 0;
-    const xStart = count > 1 ? width * 0.075 : width / 2;
+    // Ensure at least 160px between nodes in the same layer
+    const minXGap = 160;
+    const naturalXGap = count > 1 ? (width * 0.85) / (count - 1) : 0;
+    const xGap   = count > 1 ? Math.max(minXGap, naturalXGap) : 0;
+    const xStart = count > 1 ? width / 2 - (xGap * (count - 1)) / 2 : width / 2;
 
     group.forEach((n, i) => {
       n.x = xStart + i * xGap;
       n.y = topPad + l * layerGap;
-      // Add a small jitter so overlapping nodes don't stack perfectly
-      n.x += (Math.random() - 0.5) * 20;
-      n.y += (Math.random() - 0.5) * 10;
+      // No jitter — let the simulation handle fine-tuning from clean positions
     });
   }
 }
@@ -522,38 +527,46 @@ function renderGraph(nodes, edges, scopedFile) {
   // ── Force simulation ─────────────────────────────────────────────────────
   if (simulation) simulation.stop();
 
-  // Layer-based y-positioning force: gently pull nodes toward their layer's y
+  // Layer-based y-positioning force: match the same gap used in seed positions
   const numLayers = Math.max(...layerMap.values()) + 1;
-  const layerGap  = numLayers > 1 ? (height * 0.85) / (numLayers - 1) : 0;
+  const minLayerGap = 140;
+  const layerGap  = numLayers > 1
+    ? Math.max(minLayerGap, (height * 0.85) / (numLayers - 1))
+    : 0;
   const topPad    = height * 0.075;
 
   simulation = d3.forceSimulation(allNodes)
     .force('link', d3.forceLink(allEdges)
       .id(d => d.id)
+      // Longer link distances keep connected nodes well separated
       .distance(d => {
         const target = typeof d.target === 'object' ? d.target : allNodes.find(n => n.id === d.target);
-        return target && target.kind === 'external' ? 160 : 110;
+        return target && target.kind === 'external' ? 220 : 160;
       })
-      .strength(0.5)
+      // Weaker link strength so layer/collision forces can dominate
+      .strength(0.25)
     )
     .force('charge', d3.forceManyBody()
-      .strength(-400)
-      .distanceMax(400)
+      // Stronger repulsion pushes nodes apart more aggressively
+      .strength(-800)
+      .distanceMax(600)
     )
     .force('collide', d3.forceCollide()
-      .radius(d => (KIND_RADIUS[d.kind] || 13) + 28)
-      .strength(0.9)
-      .iterations(3)
+      // Account for node circle + label text width (~70px) below the circle
+      .radius(d => (KIND_RADIUS[d.kind] || 13) + 55)
+      .strength(1.0)
+      .iterations(4)
     )
-    // Horizontal centering
-    .force('x', d3.forceX(width / 2).strength(0.04))
-    // Vertical layer attraction — pull each node toward its assigned layer row
+    // Weak horizontal centering — just enough to keep the graph from drifting
+    .force('x', d3.forceX(width / 2).strength(0.02))
+    // Strong vertical layer attraction — keeps nodes in their assigned row
     .force('y', d3.forceY(d => {
       const l = layerMap.get(d.id) ?? 0;
       return topPad + l * layerGap;
-    }).strength(0.35))
-    .alphaDecay(0.025)
-    .velocityDecay(0.4)
+    }).strength(0.6))
+    // Slow cooling so nodes have time to fully separate before freezing
+    .alphaDecay(0.01)
+    .velocityDecay(0.35)
     .on('tick', ticked);
 
   // ── Edges ────────────────────────────────────────────────────────────────

@@ -6,14 +6,20 @@ Hover over any `- template:` reference to instantly see its parameters. Get real
 
 ![hover demo](logo.png)
 
+> **Full extension overview** — hover tooltip, dependency tree with "Called by", template graph, and Problems panel all in one view:
+
+![Full extension overview](images/1.png)
+
 ---
 
 ## Features
 
 ### 🔍 Template Parameter Hover
+![Template Parameter Hover](images/6.png)
 Hover over any `- template:` line to see a tooltip with all parameters declared in the referenced template — their types, default values, and which are required.
 
 ### 🔴 Parameter Validation Diagnostics
+![Parameter Validation Diagnostics](images/8.png)
 Real-time squiggly-line diagnostics on every template call site:
 - **Error** — missing a required parameter
 - **Warning** — passing an unknown parameter not declared in the template
@@ -22,12 +28,14 @@ Real-time squiggly-line diagnostics on every template call site:
 Diagnostics update automatically as you type (debounced 500ms).
 
 ### 💡 IntelliSense Autocomplete
+![IntelliSense Autocomplete](images/4.png)
 When typing inside the `parameters:` block under a `- template:` line, the extension offers autocomplete suggestions for every parameter declared in the referenced template:
 - Required parameters appear first (marked with ⚠)
 - Each suggestion shows the parameter type and default value
 - Already-set parameters are shown at the bottom
 
 ### 📦 Pipeline Variable Hover
+![Pipeline Variable Hover](images/9.png)
 Hover over any `$(variableName)` or `${{ variables.name }}` reference to see:
 - The variable's value (from the pipeline `variables:` block)
 - The line where it is defined
@@ -35,6 +43,7 @@ Hover over any `$(variableName)` or `${{ variables.name }}` reference to see:
 - For Azure DevOps system variables (`Build.*`, `System.*`, `Agent.*`, etc.): a link to the official docs
 
 ### 🌲 Template Dependency Tree View
+![Pipeline Variable Hover](images/10.png)
 A sidebar panel in the **Azure Templates Navigator** Activity Bar showing the full dependency tree for the **currently active** pipeline file:
 - Expand any node to see templates it references (recursive, nested templates supported)
 - **Cycle detection** — circular references are shown as `↩ circular` leaf nodes instead of causing infinite recursion
@@ -45,8 +54,10 @@ A sidebar panel in the **Azure Templates Navigator** Activity Bar showing the fu
 - Cross-repo templates show a 🔗 repo badge; missing templates show a ⚠ warning icon
 - Parameter count shown as `3 params · 2 req ⚠` in the dimmed description
 - Refresh button in the panel title bar; auto-refreshes on active editor change
+- **"Called by" section** — shows which files call the currently active template (reverse dependency lookup)
 
 ### 🗺️ Template Graph View
+![Template Graph View](images/2.png)
 An interactive force-directed graph in the **same Activity Bar panel** (below the tree view) showing **all YAML files** in the workspace and their template relationships at a glance:
 
 | Node colour | Meaning |
@@ -143,6 +154,16 @@ The extension automatically validates every template call site in your pipeline 
 
 > **Note:** Parameters passed as pipeline expressions (`$(var)` or `${{ variables.x }}`) are excluded from type checking since their values are only known at runtime.
 
+![Parameter validation diagnostics in the Problems panel](images/5.png)
+
+---
+
+### Quick Fix Actions
+
+When a diagnostic is reported on an unknown parameter, a **Quick Fix** lightbulb appears. Click it (or press `Cmd+.` / `Ctrl+.`) to instantly remove the offending parameter:
+
+![Quick Fix — remove unknown parameter](images/3.png)
+
 ---
 
 ### IntelliSense Autocomplete
@@ -161,6 +182,8 @@ Each suggestion includes:
 - Whether it is required
 - Its default value (if any)
 - A snippet that places the cursor after the `: ` for immediate value entry
+
+![IntelliSense autocomplete for template parameters](images/4.png)
 
 ---
 
@@ -224,7 +247,6 @@ This is complementary to the tree view:
 - Drag nodes to arrange them; they stay pinned until you double-click or hit **⟳ Reset**
 - Use **⊡ Fit** after a refresh to bring all nodes into view
 - The graph works fully offline — D3 v7 is bundled with the extension
-
 ---
 
 ## Cross-Repository Templates
