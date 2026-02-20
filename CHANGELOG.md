@@ -7,6 +7,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.7.1] - 2026-02-20
+
+### Changed
+
+- **README screenshots** — added feature screenshots throughout the README so they
+  appear on the VS Code Marketplace extension page: full overview, hover tooltip,
+  parameter validation diagnostics, IntelliSense autocomplete, pipeline variable hover,
+  template dependency tree, template graph, diagnostics panel, and quick-fix action.
+
+- **Template Graph: improved hierarchical layout spacing** — nodes in the same layer
+  are now spaced at least 160 px apart horizontally (centred), and layers are at least
+  140 px apart vertically. Random jitter removed; the force simulation fine-tunes
+  positions from clean seed coordinates, resulting in a more readable initial layout.
+
+- **Sample pipeline fix** — corrected a type-mismatch in `samples/azure-pipelines.yml`
+  (`includeRunLink: asd` → `includeRunLink: 'true'`).
+
 ## [1.7.0] - 2026-02-20
 
 ### Added
