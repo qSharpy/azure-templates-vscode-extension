@@ -317,8 +317,11 @@ class DependenciesProvider {
     /** @type {boolean} Expand/collapse all toggle state */
     this.allExpanded = true;
 
-    /** @type {boolean} When true, only error nodes are highlighted (warnings shown plain) */
+    /** @type {boolean} When true, warning-coloured icons are suppressed (warnings shown plain) */
     this.errorsOnly = false;
+
+    /** @type {boolean} When true, only nodes with errors are shown; warnings + clean nodes are hidden */
+    this.errorsOnlyFilter = false;
 
     /**
      * Diagnostics map: absolute fsPath → vscode.Diagnostic[]
@@ -407,6 +410,11 @@ class DependenciesProvider {
     this._onDidChangeTreeData.fire(undefined);
   }
 
+  toggleErrorsOnlyFilter() {
+    this.errorsOnlyFilter = !this.errorsOnlyFilter;
+    this._onDidChangeTreeData.fire(undefined);
+  }
+
   // ── Severity helpers ───────────────────────────────────────────────────────
 
   /**
@@ -421,6 +429,42 @@ class DependenciesProvider {
     const hasError = diags.some(d => d.severity === vscode.DiagnosticSeverity.Error);
     if (hasError) return 'error';
     return 'warning';
+  }
+
+  /**
+   * Returns true if `node` itself has an error, OR any descendant does.
+   * Used by the "Errors Only" filter to keep parent nodes visible when a
+   * child deep in the tree has an error.
+   * @param {DepNode} node
+   * @returns {boolean}
+   */
+  _hasErrorInSubtree(node) {
+    if (node.kind === 'file' && this._severity(node.filePath) === 'error') return true;
+    if (node.childNodes && node.childNodes.length > 0) {
+      return node.childNodes.some(child => this._hasErrorInSubtree(child));
+    }
+    return false;
+  }
+
+  /**
+   * Filters a list of DepNodes to only those that have an error (or contain
+   * a descendant with an error). Also recursively prunes their childNodes.
+   * @param {DepNode[]} nodes
+   * @returns {DepNode[]}
+   */
+  _filterErrorsOnly(nodes) {
+    const result = [];
+    for (const node of nodes) {
+      if (!this._hasErrorInSubtree(node)) continue;
+      // Clone the node so we don't mutate the cached tree
+      const clone = Object.assign(Object.create(Object.getPrototypeOf(node)), node);
+      if (clone.childNodes && clone.childNodes.length > 0) {
+        clone.childNodes = this._filterErrorsOnly(clone.childNodes);
+        clone.hasChildren = clone.childNodes.length > 0;
+      }
+      result.push(clone);
+    }
+    return result;
   }
 
   // ── TreeDataProvider ───────────────────────────────────────────────────────
@@ -489,14 +533,16 @@ class DependenciesProvider {
       return this._rootNodes;
     }
 
-    // Section node: return pre-computed children
+    // Section node: return pre-computed children (filtered if errorsOnlyFilter is on)
     if (node.kind === 'section') {
-      return node.childNodes || [];
+      const children = node.childNodes || [];
+      return this.errorsOnlyFilter ? this._filterErrorsOnly(children) : children;
     }
 
-    // File node: return pre-computed children (already built recursively)
+    // File node: return pre-computed children (filtered if errorsOnlyFilter is on)
     if (node.kind === 'file') {
-      return node.childNodes || [];
+      const children = node.childNodes || [];
+      return this.errorsOnlyFilter ? this._filterErrorsOnly(children) : children;
     }
 
     return [];
@@ -769,12 +815,22 @@ function createTreeViewProvider(context) {
     )
   );
 
-  // Errors Only toggle
+  // Hide Warnings toggle (suppresses warning-coloured icons)
   context.subscriptions.push(
     vscode.commands.registerCommand(
       'azure-templates-navigator.toggleErrorsOnly',
       () => {
         provider.toggleErrorsOnly();
+      }
+    )
+  );
+
+  // Errors Only filter (hides non-error nodes from the tree entirely)
+  context.subscriptions.push(
+    vscode.commands.registerCommand(
+      'azure-templates-navigator.toggleErrorsOnlyFilter',
+      () => {
+        provider.toggleErrorsOnlyFilter();
       }
     )
   );

@@ -2,7 +2,7 @@
   "name": "azure-templates-navigator",
   "displayName": "Azure Templates Navigator",
   "description": "Hover over Azure Pipeline template references to instantly see their parameters. Click to open the template file. Validates parameters, provides IntelliSense autocomplete, variable hover, a template dependency tree view, and an interactive workspace-wide template graph.",
-  "version": "1.11.0",
+  "version": "1.12.0",
   "publisher": "bogdanbujor",
   "icon": "logo.png",
   "repository": {
@@ -130,6 +130,12 @@
       },
       {
         "command": "azure-templates-navigator.toggleErrorsOnly",
+        "title": "Hide Warnings",
+        "category": "Azure Templates Navigator",
+        "icon": "$(warning)"
+      },
+      {
+        "command": "azure-templates-navigator.toggleErrorsOnlyFilter",
         "title": "Errors Only",
         "category": "Azure Templates Navigator",
         "icon": "$(error)"
@@ -220,14 +226,19 @@
           "group": "navigation@3"
         },
         {
-          "command": "azure-templates-navigator.copyCurrentFilePath",
+          "command": "azure-templates-navigator.toggleErrorsOnlyFilter",
           "when": "view == azure-templates-navigator.templateTree",
           "group": "navigation@4"
         },
         {
-          "command": "azure-templates-navigator.refreshTemplateTree",
+          "command": "azure-templates-navigator.copyCurrentFilePath",
           "when": "view == azure-templates-navigator.templateTree",
           "group": "navigation@5"
+        },
+        {
+          "command": "azure-templates-navigator.refreshTemplateTree",
+          "when": "view == azure-templates-navigator.templateTree",
+          "group": "navigation@6"
         },
         {
           "command": "azure-templates-navigator.refreshTemplateGraph",

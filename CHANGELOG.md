@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.12.0] - 2026-02-21
+
+### Added
+
+- **Dependencies tree: "Errors Only" filter button** — a new `$(error)` toolbar button in the
+  Dependencies panel hides all nodes that have no errors (and no error-containing descendants)
+  from the tree with a single click. Only templates/pipelines with at least one error diagnostic
+  remain visible, making it trivial to spot broken files in large workspaces.
+
+### Changed
+
+- **Dependencies tree: "Errors Only" button renamed to "Hide Warnings"** — the existing
+  `$(warning)` toolbar button that suppressed warning-coloured icons is now labelled
+  **Hide Warnings** to clearly distinguish it from the new **Errors Only** filter.
+
 ## [1.11.0] - 2026-02-21
 
 ### Changed
@@ -478,6 +493,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Required parameters color highlighting
 - Required parameters highlight color is parametrized
 
+[1.12.0]: https://github.com/qSharpy/azure-templates-vscode-extension/compare/v1.11.0...v1.12.0
 [1.11.0]: https://github.com/qSharpy/azure-templates-vscode-extension/compare/v1.10.0...v1.11.0
 [1.10.0]: https://github.com/qSharpy/azure-templates-vscode-extension/compare/v1.9.0...v1.10.0
 [1.9.0]: https://github.com/qSharpy/azure-templates-vscode-extension/compare/v1.8.0...v1.9.0
