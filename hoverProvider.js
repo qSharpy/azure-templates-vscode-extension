@@ -560,7 +560,16 @@ function buildHoverMarkdown(templateRef, params, requiredColor, repoName, filePa
     return md;
   }
 
-  md.appendMarkdown('**Parameters:**\n\n');
+  // Search link — opens a QuickPick so the user can type to filter parameters,
+  // navigate with arrow keys, and press Enter (or double-click) to jump to the
+  // parameter definition in the template file.
+  if (filePath && params.length > 0) {
+    const searchArgs = encodeURIComponent(JSON.stringify([{ filePath, params }]));
+    const searchCmd = `command:azure-templates-navigator.searchTemplateParams?${searchArgs}`;
+    md.appendMarkdown(`**Parameters:** [$(search) Search](${searchCmd})\n\n`);
+  } else {
+    md.appendMarkdown('**Parameters:**\n\n');
+  }
 
   for (const p of params) {
     const nameHtml = p.required

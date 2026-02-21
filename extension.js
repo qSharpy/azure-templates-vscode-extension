@@ -138,6 +138,52 @@ function activate(context) {
   // tab groups, then open in column = max + 1.  VS Code will create a new split
   // for any column number that doesn't exist yet.
   // If no split exists yet, ViewColumn.Beside (-2) is used as the initial split.
+  // ── Command: search parameters in a template from the hover tooltip ──────────
+  // Args: { filePath: string, params: { name, type, default, required, line }[] }
+  //
+  // Opens a QuickPick populated with all parameters of the hovered template.
+  // The user can type to filter, navigate with arrow keys, and press Enter
+  // (or double-click) to jump directly to that parameter's definition line
+  // inside the template file.
+  const searchParamsDisposable = vscode.commands.registerCommand(
+    'azure-templates-navigator.searchTemplateParams',
+    async ({ filePath, params } = {}) => {
+      if (!filePath || !Array.isArray(params) || params.length === 0) return;
+
+      /** @type {vscode.QuickPickItem[]} */
+      const items = params.map(p => {
+        const requiredTag = p.required ? '$(warning) required' : '$(check) optional';
+        const defaultTag = p.default !== undefined ? `  default: ${p.default}` : '';
+        return {
+          label: `$(symbol-parameter) ${p.name}`,
+          description: `${p.type}${defaultTag}`,
+          detail: requiredTag,
+          // Stash the line number so we can jump to it on selection
+          _line: p.line,
+        };
+      });
+
+      const pick = await vscode.window.showQuickPick(items, {
+        title: `Parameters — ${filePath.split(/[\\/]/).pop()}`,
+        placeHolder: 'Type to filter parameters…',
+        matchOnDescription: true,
+        matchOnDetail: false,
+      });
+
+      if (!pick) return;
+
+      const uri = vscode.Uri.file(filePath);
+      const doc = await vscode.workspace.openTextDocument(uri);
+      const editor = await vscode.window.showTextDocument(doc, vscode.ViewColumn.Active);
+
+      const line = typeof pick._line === 'number' ? pick._line : 0;
+      const pos = new vscode.Position(line, 0);
+      editor.selection = new vscode.Selection(pos, pos);
+      editor.revealRange(new vscode.Range(pos, pos), vscode.TextEditorRevealType.InCenter);
+    }
+  );
+  context.subscriptions.push(searchParamsDisposable);
+
   const openTemplateDisposable = vscode.commands.registerCommand(
     'azure-templates-navigator.openTemplate',
     async ({ filePath, beside = false } = {}) => {

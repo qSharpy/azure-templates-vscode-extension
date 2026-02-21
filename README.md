@@ -18,6 +18,13 @@ Hover over any `- template:` reference to instantly see its parameters. Get real
 ![Template Parameter Hover](images/6.png)
 Hover over any `- template:` line to see a tooltip with all parameters declared in the referenced template — their types, default values, and which are required.
 
+The tooltip also shows a **🔍 Search** link next to the Parameters heading. Clicking it opens a QuickPick pre-populated with every parameter so you can:
+- **Type** to instantly filter by name, type, or default value
+- **↑ / ↓** to navigate the filtered list
+- **Enter** (or double-click) to jump directly to that parameter's definition line in the template file
+
+Particularly useful for templates with 20–40+ parameters where scrolling the tooltip is slow.
+
 ### 🔴 Parameter Validation Diagnostics
 ![unused param](images/remove-unused-param.gif)
 Real-time squiggly-line diagnostics on every template call site **and** inside template files themselves:

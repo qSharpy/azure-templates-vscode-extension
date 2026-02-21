@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.13.0] - 2026-02-21
+
+### Added
+
+- **Hover tooltip: parameter search** — a `$(search) Search` link now appears next to the
+  **Parameters:** heading in the template hover tooltip. Clicking it opens a VS Code QuickPick
+  pre-populated with every parameter of that template. Type any text to instantly filter the list,
+  navigate with the **↑ / ↓** arrow keys, and press **Enter** (or double-click) to jump directly
+  to that parameter's definition line inside the template file. Each item shows the parameter name,
+  its type and default value in the description, and a required/optional badge in the detail line.
+  Particularly useful for templates with 20–40+ parameters where scrolling the tooltip is slow.
+
 ## [1.12.0] - 2026-02-21
 
 ### Added
