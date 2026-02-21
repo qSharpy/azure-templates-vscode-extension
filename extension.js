@@ -8,6 +8,8 @@ const { completionProvider } = require('./completionProvider');
 const { createTreeViewProvider } = require('./treeViewProvider');
 const { createGraphViewProvider } = require('./graphWebViewProvider');
 const { quickFixProvider } = require('./quickFixProvider');
+const { workspaceIndex } = require('./workspaceIndex');
+const fileCache = require('./fileCache');
 
 /**
  * Called once when the extension is first activated.
@@ -15,6 +17,33 @@ const { quickFixProvider } = require('./quickFixProvider');
  */
 function activate(context) {
   console.log('[Azure Templates Navigator] Extension activated');
+
+  // ── WorkspaceIndex — build once on activation ─────────────────────────────
+  // Scans all YAML files and builds the reverse adjacency map used by the
+  // "Called by" tree.  Uses fileCache so subsequent operations are fast.
+  const wf = vscode.workspace.workspaceFolders;
+  if (wf && wf.length > 0) {
+    const workspaceRoot = wf[0].uri.fsPath;
+    // Build synchronously — with fileCache this takes <50ms for 300 files
+    workspaceIndex.build(workspaceRoot);
+    console.log(`[Azure Templates Navigator] WorkspaceIndex built (${workspaceIndex.getAllFiles().length} files)`);
+  }
+
+  // Keep the index in sync with file-system changes
+  const indexWatcher = vscode.workspace.createFileSystemWatcher('**/*.{yml,yaml}');
+  indexWatcher.onDidChange(uri => {
+    fileCache.invalidate(uri.fsPath);
+    workspaceIndex.rebuildFile(uri.fsPath);
+  });
+  indexWatcher.onDidCreate(uri => {
+    fileCache.invalidate(uri.fsPath);
+    workspaceIndex.addFile(uri.fsPath);
+  });
+  indexWatcher.onDidDelete(uri => {
+    fileCache.invalidate(uri.fsPath);
+    workspaceIndex.removeFile(uri.fsPath);
+  });
+  context.subscriptions.push(indexWatcher);
 
   // ── Hover provider ────────────────────────────────────────────────────────
   // Handles both template: hover (parameters tooltip) and variable hover

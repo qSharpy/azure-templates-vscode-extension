@@ -1,7 +1,8 @@
 'use strict';
 
-const fs = require('fs');
-const vscode = require('vscode');
+const fs        = require('fs');
+const vscode    = require('vscode');
+const fileCache = require('./fileCache');
 const {
   parseParameters,
   parseRepositoryAliases,
@@ -450,6 +451,9 @@ function createDiagnosticProvider(context, opts = {}) {
   const watcher = vscode.workspace.createFileSystemWatcher('**/*.{yml,yaml}');
 
   const onFileChange = (uri) => {
+    // Invalidate the file cache so the next read gets fresh content
+    fileCache.invalidate(uri.fsPath);
+
     // If the file is already open in an editor, the document-change event
     // handles it; skip to avoid double-scanning.
     const isOpen = vscode.workspace.textDocuments.some(
@@ -474,6 +478,7 @@ function createDiagnosticProvider(context, opts = {}) {
   watcher.onDidChange(onFileChange);
   watcher.onDidCreate(onFileChange);
   watcher.onDidDelete((uri) => {
+    fileCache.invalidate(uri.fsPath);
     collection.delete(uri);
     latestResults.delete(uri.fsPath);
     notifyUpdate();

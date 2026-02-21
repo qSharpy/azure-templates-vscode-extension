@@ -1,8 +1,10 @@
 'use strict';
 
-const fs = require('fs');
-const path = require('path');
-const vscode = require('vscode');
+const fs        = require('fs');
+const path      = require('path');
+const vscode    = require('vscode');
+const fileCache = require('./fileCache');
+const { workspaceIndex } = require('./workspaceIndex');
 const {
   parseParameters,
   parseRepositoryAliases,
@@ -12,6 +14,7 @@ const {
   collectYamlFiles,
   extractTemplateRefs,
 } = require('./graphDataBuilder');
+const { FuzzySearch } = require('./fuzzySearch');
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Node model
@@ -70,137 +73,82 @@ class DepNode {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Upstream trie builder
+// Upstream tree builder — index-based (replaces findChain / trie approach)
 // ─────────────────────────────────────────────────────────────────────────────
 
 /**
- * Returns the full call-chain from `startFile` up to `targetFile`.
- * Each element is an absolute path. Returns null if no path exists.
+ * Converts the raw node objects returned by workspaceIndex.buildUpstreamTree()
+ * into proper DepNode instances (with severity, icons, etc.).
  *
- * @param {string}   startFile
- * @param {string}   targetFile
- * @param {string}   workspaceRoot
- * @param {Set<string>} visited
- * @returns {string[]|null}
- */
-function findChain(startFile, targetFile, workspaceRoot, visited = new Set()) {
-  if (visited.has(startFile)) return null;
-  visited.add(startFile);
-
-  let text = '';
-  try { text = fs.readFileSync(startFile, 'utf8'); } catch { return null; }
-
-  const aliases = parseRepositoryAliases(text);
-  const refs = extractTemplateRefs(startFile);
-
-  for (const { templateRef } of refs) {
-    if (/\$\{/.test(templateRef) || /\$\(/.test(templateRef)) continue;
-    const resolved = resolveTemplatePath(templateRef, startFile, aliases);
-    if (!resolved || !resolved.filePath) continue;
-
-    if (resolved.filePath === targetFile) {
-      return [startFile, targetFile];
-    }
-
-    const sub = findChain(resolved.filePath, targetFile, workspaceRoot, new Set(visited));
-    if (sub) return [startFile, ...sub];
-  }
-
-  return null;
-}
-
-/**
- * Trie node used while building the upstream tree.
- * @typedef {{ filePath: string, children: Map<string, TrieNode> }} TrieNode
- */
-
-/**
- * Inserts a chain (array of absolute paths) into a trie.
- * The chain goes from root → … → direct-caller (the target itself is excluded).
- *
- * @param {Map<string, object>} trie  root-level map: filePath → TrieNode
- * @param {string[]} chain
- */
-function insertChain(trie, chain) {
-  let current = trie;
-  for (const fp of chain) {
-    if (!current.has(fp)) {
-      current.set(fp, { filePath: fp, children: new Map() });
-    }
-    current = current.get(fp).children;
-  }
-}
-
-/**
- * Converts a trie map into an array of DepNode trees.
- *
- * @param {Map<string, object>} trie
- * @param {string}              workspaceRoot
- * @param {string}              targetFile   The focal file (excluded from display)
+ * @param {object[]} rawNodes
  * @returns {DepNode[]}
  */
-function trieToNodes(trie, workspaceRoot, targetFile) {
-  const result = [];
-  for (const { filePath, children } of trie.values()) {
-    if (filePath === targetFile) continue;
-
-    const childNodes = trieToNodes(children, workspaceRoot, targetFile);
-    const rel = path.relative(workspaceRoot, filePath).replace(/\\/g, '/');
-
-    result.push(new DepNode({
+function _rawNodesToDepNodes(rawNodes) {
+  return rawNodes.map(n => {
+    const childNodes = n.childNodes && n.childNodes.length > 0
+      ? _rawNodesToDepNodes(n.childNodes)
+      : [];
+    return new DepNode({
       kind: 'file',
-      label: path.basename(filePath),
-      relativePath: rel,
-      filePath,
+      label: n.label,
+      relativePath: n.relativePath,
+      filePath: n.filePath,
+      paramCount: n.paramCount,
+      requiredCount: n.requiredCount,
       hasChildren: childNodes.length > 0,
       childNodes,
-    }));
-  }
-  return result;
+    });
+  });
 }
 
 /**
  * Builds the "Called by" upstream tree for `targetFile`.
- * Returns an array of root-level DepNode trees (trie-merged).
+ *
+ * Uses the WorkspaceIndex (pre-computed reverse adjacency map) when ready,
+ * falling back to a lightweight direct-callers-only scan when the index is
+ * not yet available (e.g. immediately after activation).
  *
  * @param {string} targetFile
  * @param {string} workspaceRoot
  * @returns {{ nodes: DepNode[], directCallerCount: number }}
  */
 function buildUpstreamTree(targetFile, workspaceRoot) {
-  const allYaml = collectYamlFiles(workspaceRoot);
+  if (workspaceIndex.isReady()) {
+    // Fast path: O(callers) BFS over in-memory maps
+    const { nodes: rawNodes, directCallerCount } =
+      workspaceIndex.buildUpstreamTree(targetFile, workspaceRoot);
+    const nodes = _rawNodesToDepNodes(rawNodes);
+    return { nodes, directCallerCount };
+  }
 
-  // Find direct callers first (for the count badge)
-  const directCallers = new Set();
+  // Fallback (index not yet built): show only direct callers, no deep chain.
+  // This is fast (single pass over cached file contents) and avoids blocking.
+  const allYaml = collectYamlFiles(workspaceRoot);
+  const directCallerNodes = [];
   for (const yamlFile of allYaml) {
     if (yamlFile === targetFile) continue;
-    let text = '';
-    try { text = fs.readFileSync(yamlFile, 'utf8'); } catch { continue; }
+    const text = fileCache.readFile(yamlFile);
+    if (!text) continue;
     const aliases = parseRepositoryAliases(text);
     const refs = extractTemplateRefs(yamlFile);
     for (const { templateRef } of refs) {
       if (/\$\{/.test(templateRef) || /\$\(/.test(templateRef)) continue;
       const resolved = resolveTemplatePath(templateRef, yamlFile, aliases);
       if (resolved && resolved.filePath === targetFile) {
-        directCallers.add(yamlFile);
+        const rel = path.relative(workspaceRoot, yamlFile).replace(/\\/g, '/');
+        directCallerNodes.push(new DepNode({
+          kind: 'file',
+          label: path.basename(yamlFile),
+          relativePath: rel,
+          filePath: yamlFile,
+          hasChildren: false,
+          childNodes: [],
+        }));
         break;
       }
     }
   }
-
-  // Build full chains from every file that transitively reaches targetFile
-  const trie = new Map();
-  for (const yamlFile of allYaml) {
-    if (yamlFile === targetFile) continue;
-    const chain = findChain(yamlFile, targetFile, workspaceRoot);
-    if (!chain) continue;
-    // chain = [yamlFile, ..., targetFile]
-    // We exclude targetFile itself from the trie
-    insertChain(trie, chain.slice(0, -1));
-  }
-
-  const nodes = trieToNodes(trie, workspaceRoot, targetFile);
-  return { nodes, directCallerCount: directCallers.size };
+  return { nodes: directCallerNodes, directCallerCount: directCallerNodes.length };
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -216,8 +164,8 @@ function buildUpstreamTree(targetFile, workspaceRoot) {
  * @returns {DepNode[]}
  */
 function buildDownstreamNodes(filePath, visited = new Set(), workspaceRoot = null) {
-  let text;
-  try { text = fs.readFileSync(filePath, 'utf8'); } catch { return []; }
+  const text = fileCache.readFile(filePath);
+  if (!text) return [];
 
   const lines = text.replace(/\r\n/g, '\n').split('\n');
   const repoAliases = parseRepositoryAliases(text);
@@ -251,7 +199,7 @@ function buildDownstreamNodes(filePath, visited = new Set(), workspaceRoot = nul
 
     const { filePath: resolvedPath, repoName } = resolved;
 
-    if (!resolvedPath || !fs.existsSync(resolvedPath)) {
+    if (!resolvedPath || !fileCache.fileExists(resolvedPath)) {
       children.push(new DepNode({
         kind: 'notFound',
         label: templateRef,
@@ -281,8 +229,8 @@ function buildDownstreamNodes(filePath, visited = new Set(), workspaceRoot = nul
     let paramCount = 0;
     let requiredCount = 0;
     let hasChildren = false;
-    try {
-      const tplText = fs.readFileSync(resolvedPath, 'utf8');
+    const tplText = fileCache.readFile(resolvedPath);
+    if (tplText) {
       const params = parseParameters(tplText);
       paramCount = params.length;
       requiredCount = params.filter(p => p.required).length;
@@ -290,7 +238,7 @@ function buildDownstreamNodes(filePath, visited = new Set(), workspaceRoot = nul
       hasChildren = tplText.replace(/\r\n/g, '\n').split('\n').some(
         l => templateLineRe.test(l.replace(/(^\s*#.*|\s#.*)$/, ''))
       );
-    } catch { /* ignore */ }
+    }
 
     const shortName = path.basename(resolvedPath);
     const label = repoName ? `${shortName} @${repoName}` : shortName;
@@ -318,6 +266,31 @@ function buildDownstreamNodes(filePath, visited = new Set(), workspaceRoot = nul
   }
 
   return children;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Fuzzy search index builder
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Builds a FuzzySearch index from all YAML files in the workspace.
+ *
+ * @param {string} workspaceRoot
+ * @returns {FuzzySearch}
+ */
+function buildSearchIndex(workspaceRoot) {
+  const engine = new FuzzySearch();
+  const yamlFiles = collectYamlFiles(workspaceRoot);
+
+  const entries = yamlFiles.map(filePath => {
+    const relativePath = path.relative(workspaceRoot, filePath).replace(/\\/g, '/');
+    const filename = path.basename(filePath);
+    const directory = path.dirname(relativePath).replace(/\\/g, '/');
+    return { filePath, filename, relativePath, directory };
+  });
+
+  engine.buildIndex(entries);
+  return engine;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -359,11 +332,51 @@ class DependenciesProvider {
 
     /** @type {DepNode[]} Cached root section nodes for expand-all */
     this._rootNodes = [];
+
+    /**
+     * Fuzzy search engine — rebuilt lazily when the search command is invoked.
+     * @type {FuzzySearch|null}
+     */
+    this._searchEngine = null;
+
+    /**
+     * Timestamp of the last index build (ms). Used to avoid rebuilding too often.
+     * @type {number}
+     */
+    this._searchIndexBuiltAt = 0;
   }
 
   /** @param {vscode.TreeView<DepNode>} treeView */
   setTreeView(treeView) {
     this._treeView = treeView;
+  }
+
+  /**
+   * Returns a (possibly cached) FuzzySearch engine for the current workspace.
+   * Rebuilds the index if it is older than 30 seconds or has never been built.
+   * @returns {FuzzySearch|null}
+   */
+  getOrBuildSearchEngine() {
+    const wf = vscode.workspace.workspaceFolders;
+    if (!wf || wf.length === 0) return null;
+    const workspaceRoot = wf[0].uri.fsPath;
+
+    const now = Date.now();
+    const stale = now - this._searchIndexBuiltAt > 30000;
+
+    if (!this._searchEngine || stale) {
+      this._searchEngine = buildSearchIndex(workspaceRoot);
+      this._searchIndexBuiltAt = now;
+    }
+
+    return this._searchEngine;
+  }
+
+  /**
+   * Invalidates the search index so it will be rebuilt on next search.
+   */
+  invalidateSearchIndex() {
+    this._searchIndexBuiltAt = 0;
   }
 
   /**
@@ -814,6 +827,61 @@ function createTreeViewProvider(context) {
             vscode.window.showInformationMessage(`Copied: ${node.filePath}`);
           });
         }
+      }
+    )
+  );
+
+  // ── Fuzzy search command ───────────────────────────────────────────────────
+  // Opens a QuickPick popup with debounced fuzzy search over all indexed YAML files.
+  context.subscriptions.push(
+    vscode.commands.registerCommand(
+      'azure-templates-navigator.searchDependencyTree',
+      async () => {
+        const engine = provider.getOrBuildSearchEngine();
+        if (!engine) {
+          vscode.window.showWarningMessage('Azure Templates Navigator: No workspace folder open.');
+          return;
+        }
+
+        const qp = vscode.window.createQuickPick();
+        qp.placeholder = `Search ${engine.size} indexed templates… (typos OK)`;
+        qp.matchOnDescription = false;
+        qp.matchOnDetail = false;
+
+        /** @type {NodeJS.Timeout|null} */
+        let debounceTimer = null;
+
+        qp.onDidChangeValue(value => {
+          if (debounceTimer) clearTimeout(debounceTimer);
+          debounceTimer = setTimeout(() => {
+            const results = engine.search(value, 20);
+            qp.items = results.map(({ entry }) => ({
+              label: entry.filename,
+              description: entry.directory !== '.' ? entry.directory : '',
+              detail: undefined,
+              // Stash the full path for use on accept
+              _filePath: entry.filePath,
+            }));
+          }, 150);
+        });
+
+        qp.onDidAccept(() => {
+          const selected = qp.selectedItems[0];
+          if (selected && selected._filePath) {
+            qp.hide();
+            vscode.commands.executeCommand(
+              'azure-templates-navigator.openTemplate',
+              { filePath: selected._filePath, beside: false }
+            );
+          }
+        });
+
+        qp.onDidHide(() => {
+          if (debounceTimer) clearTimeout(debounceTimer);
+          qp.dispose();
+        });
+
+        qp.show();
       }
     )
   );

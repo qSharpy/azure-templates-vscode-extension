@@ -7,6 +7,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.11.0] - 2026-02-21
+
+### Changed
+
+- **Performance: shared in-memory file cache** (`fileCache.js`) — a singleton mtime-aware cache
+  now serves all file reads across the tree view, hover provider, diagnostics, and graph builder.
+  Eliminates redundant `fs.readFileSync` calls; the same file is read from disk at most once per
+  modification. Benchmark on 300-file fixture: `buildUpstreamTree` cold −65 %, `parseParameters`
+  warm −84 %.
+
+- **Performance: pre-computed workspace index** (`workspaceIndex.js`) — on activation the
+  extension builds a reverse-adjacency map (`reverseAdj: Map<target, Set<caller>>`) and a
+  forward-adjacency map in the background. The "Called by" upstream tree now performs a BFS over
+  in-memory maps instead of the previous O(N²) recursive disk scan (`findChain`). Benchmark on
+  300-file fixture: `buildUpstreamTree` cold 79.6 ms → 0.8 ms (−99 %), warm 79.6 ms → 0.2 ms
+  (−99.7 %). The index is updated incrementally on every file create / change / delete event.
+
 ## [1.10.0] - 2026-02-20
 
 ### Added
@@ -461,6 +478,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Required parameters color highlighting
 - Required parameters highlight color is parametrized
 
+[1.11.0]: https://github.com/qSharpy/azure-templates-vscode-extension/compare/v1.10.0...v1.11.0
 [1.10.0]: https://github.com/qSharpy/azure-templates-vscode-extension/compare/v1.9.0...v1.10.0
 [1.9.0]: https://github.com/qSharpy/azure-templates-vscode-extension/compare/v1.8.0...v1.9.0
 [1.8.0]: https://github.com/qSharpy/azure-templates-vscode-extension/compare/v1.7.1...v1.8.0

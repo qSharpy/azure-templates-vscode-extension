@@ -1,3 +1,7 @@
 node_modules
 .vscode-test/
 *.vsix
+
+# Benchmark generated files (created on demand, not committed)
+bench/fixture/
+bench/benchmark-results.json

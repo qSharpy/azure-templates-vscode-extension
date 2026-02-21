@@ -11,8 +11,9 @@
  * unit-tested without a VS Code host.
  */
 
-const fs   = require('fs');
-const path = require('path');
+const fs        = require('fs');
+const path      = require('path');
+const fileCache = require('./fileCache');
 const {
   parseRepositoryAliases,
   parseParameters,
@@ -77,12 +78,8 @@ function isPipelineRoot(text) {
  * @returns {{ templateRef: string, line: number }[]}
  */
 function extractTemplateRefs(filePath) {
-  let text;
-  try {
-    text = fs.readFileSync(filePath, 'utf8');
-  } catch {
-    return [];
-  }
+  const text = fileCache.readFile(filePath);
+  if (!text) return [];
   const refs = [];
   // Normalize CRLF → LF so that regex $ anchors work on Windows-authored files
   const lines = text.replace(/\r\n/g, '\n').split('\n');
@@ -147,8 +144,7 @@ function buildWorkspaceGraph(workspaceRoot, subPath) {
 
   // ── Pass 1: register every YAML file as a node ──────────────────────────
   for (const filePath of yamlFiles) {
-    let text = '';
-    try { text = fs.readFileSync(filePath, 'utf8'); } catch { /* skip */ }
+    const text = fileCache.readFile(filePath) || '';
 
     const kind = isPipelineRoot(text) ? 'pipeline' : 'local';
     nodeMap.set(filePath, {
@@ -164,8 +160,8 @@ function buildWorkspaceGraph(workspaceRoot, subPath) {
 
   // ── Pass 2: for each file, resolve its template references ───────────────
   for (const filePath of yamlFiles) {
-    let text = '';
-    try { text = fs.readFileSync(filePath, 'utf8'); } catch { continue; }
+    const text = fileCache.readFile(filePath);
+    if (!text) continue;
 
     const repoAliases = parseRepositoryAliases(text);
     const refs = extractTemplateRefs(filePath);
@@ -199,7 +195,7 @@ function buildWorkspaceGraph(workspaceRoot, subPath) {
 
         if (!resolvedPath) continue;
 
-        if (!fs.existsSync(resolvedPath)) {
+        if (!fileCache.fileExists(resolvedPath)) {
           // Missing file node
           targetId = `MISSING:${resolvedPath}`;
           if (!nodeMap.has(targetId)) {
@@ -256,12 +252,12 @@ function buildWorkspaceGraph(workspaceRoot, subPath) {
   // ── Pass 3: fill in paramCount for all resolvable nodes ──────────────────
   for (const [, node] of nodeMap) {
     if (node.filePath && node.kind !== 'missing') {
-      try {
-        const tplText = fs.readFileSync(node.filePath, 'utf8');
+      const tplText = fileCache.readFile(node.filePath);
+      if (tplText) {
         const params = parseParameters(tplText);
         node.paramCount = params.length;
         node.requiredCount = params.filter(p => p.required).length;
-      } catch { /* ignore */ }
+      }
     }
   }
 
@@ -276,116 +272,58 @@ function buildWorkspaceGraph(workspaceRoot, subPath) {
 // ---------------------------------------------------------------------------
 
 /**
- * Adds a resolved downstream template reference as a node+edge to the given
- * nodeMap / edges / edgeKeys collections.
+ * Ensures a real (non-missing, non-unknown) file node exists in nodeMap and
+ * returns its id, or null if the file cannot be resolved / does not exist.
  *
- * @param {string}              sourceId   ID of the source node (the caller)
- * @param {string}              templateRef Raw template reference string
- * @param {string}              callerFile  Absolute path of the file that contains the ref
- * @param {object}              resolved    Result of resolveTemplatePath()
+ * @param {string}              filePath
+ * @param {string}              workspaceRoot
  * @param {Map<string,GraphNode>} nodeMap
- * @param {GraphEdge[]}         edges
- * @param {Set<string>}         edgeKeys
- * @param {'downstream'|'upstream'} direction
- * @param {string}              workspaceRoot  Absolute path to the workspace root
+ * @param {string|null}         [repoName]
+ * @returns {string|null}  node id
  */
-function _addResolvedRef(sourceId, templateRef, callerFile, resolved, nodeMap, edges, edgeKeys, direction, workspaceRoot) {
-  let targetId;
-  let edgeLabel;
+function _ensureFileNode(filePath, workspaceRoot, nodeMap, repoName = null) {
+  if (nodeMap.has(filePath)) return filePath;
 
-  if (resolved.unknownAlias) {
-    targetId = `UNKNOWN_ALIAS:${resolved.alias}:${templateRef}`;
-    if (!nodeMap.has(targetId)) {
-      nodeMap.set(targetId, {
-        id: targetId,
-        label: path.basename(templateRef.split('@')[0]),
-        kind: 'unknown',
-        alias: resolved.alias,
-        paramCount: 0,
-        requiredCount: 0,
-      });
-    }
-    edgeLabel = `@${resolved.alias}`;
-  } else {
-    const { filePath: resolvedPath, repoName, alias } = resolved;
-    if (!resolvedPath) return;
-
-    if (!fs.existsSync(resolvedPath)) {
-      targetId = `MISSING:${resolvedPath}`;
-      if (!nodeMap.has(targetId)) {
-        nodeMap.set(targetId, {
-          id: targetId,
-          label: path.basename(resolvedPath),
-          relativePath: workspaceRoot ? path.relative(workspaceRoot, resolvedPath).replace(/\\/g, '/') : path.basename(resolvedPath),
-          kind: 'missing',
-          filePath: resolvedPath,
-          repoName,
-          paramCount: 0,
-          requiredCount: 0,
-        });
-      }
-    } else {
-      targetId = resolvedPath;
-      if (!nodeMap.has(targetId)) {
-        let childParamCount = 0;
-        let childRequiredCount = 0;
-        try {
-          const childText = fs.readFileSync(resolvedPath, 'utf8');
-          const childParams = parseParameters(childText);
-          childParamCount = childParams.length;
-          childRequiredCount = childParams.filter(p => p.required).length;
-        } catch { /* ignore */ }
-
-        nodeMap.set(targetId, {
-          id: targetId,
-          label: path.basename(resolvedPath),
-          relativePath: workspaceRoot ? path.relative(workspaceRoot, resolvedPath).replace(/\\/g, '/') : path.basename(resolvedPath),
-          kind: repoName ? 'external' : 'local',
-          filePath: resolvedPath,
-          repoName,
-          paramCount: childParamCount,
-          requiredCount: childRequiredCount,
-        });
-      }
-
-      // Upgrade to external if referenced via alias
-      const existingNode = nodeMap.get(targetId);
-      if (repoName && existingNode.kind !== 'external') {
-        existingNode.kind = 'external';
-        existingNode.repoName = repoName;
-      }
-
-      if (alias && alias !== 'self') {
-        edgeLabel = `@${alias}`;
-      }
-    }
+  let paramCount = 0;
+  let requiredCount = 0;
+  const text = fileCache.readFile(filePath) || '';
+  if (text) {
+    const params = parseParameters(text);
+    paramCount = params.length;
+    requiredCount = params.filter(p => p.required).length;
   }
 
-  // For upstream direction the edge goes: caller → active file (sourceId is the caller)
-  // For downstream direction the edge goes: active file → template (sourceId is the active file)
-  const edgeSrc = direction === 'upstream' ? targetId : sourceId;
-  const edgeTgt = direction === 'upstream' ? sourceId : targetId;
-
-  const edgeKey = `${edgeSrc}→${edgeTgt}`;
-  if (!edgeKeys.has(edgeKey)) {
-    edgeKeys.add(edgeKey);
-    const edge = { source: edgeSrc, target: edgeTgt, direction };
-    if (edgeLabel) edge.label = edgeLabel;
-    edges.push(edge);
-  }
+  const kind = repoName ? 'external' : (isPipelineRoot(text) ? 'pipeline' : 'local');
+  nodeMap.set(filePath, {
+    id: filePath,
+    label: path.basename(filePath),
+    relativePath: path.relative(workspaceRoot, filePath).replace(/\\/g, '/'),
+    kind,
+    filePath,
+    repoName: repoName || undefined,
+    paramCount,
+    requiredCount,
+  });
+  return filePath;
 }
 
 /**
- * Builds a scoped graph for a single file: the file itself as the root node,
- * plus all templates it directly references (downstream, depth = 1) AND all
- * workspace files that reference it (upstream callers, depth = 1).
+ * Builds a scoped graph for a single file using multi-level BFS.
+ *
+ * Downstream BFS: starting from `filePath`, follows template references up to
+ * `depth` levels deep.
+ *
+ * Upstream BFS: starting from `filePath`, finds all workspace files that
+ * (transitively) call it, up to `depth` levels up.
  *
  * @param {string} filePath      Absolute path to the pipeline / template file
- * @param {string} workspaceRoot Absolute path to the workspace root (used for
- *                               resolving relative template references)
+ * @param {string} workspaceRoot Absolute path to the workspace root
+ * @param {number} [depth=1]     How many BFS levels to traverse (1–10)
  * @returns {{ nodes: GraphNode[], edges: GraphEdge[] }}
  */
-function buildFileGraph(filePath, workspaceRoot) {
+function buildFileGraph(filePath, workspaceRoot, depth = 1) {
+  const maxDepth = Math.max(1, Math.min(10, depth));
+
   /** @type {Map<string, GraphNode>} */
   const nodeMap = new Map();
   /** @type {GraphEdge[]} */
@@ -394,8 +332,7 @@ function buildFileGraph(filePath, workspaceRoot) {
   const edgeKeys = new Set();
 
   // ── Root node ─────────────────────────────────────────────────────────────
-  let rootText = '';
-  try { rootText = fs.readFileSync(filePath, 'utf8'); } catch { /* skip */ }
+  let rootText = fileCache.readFile(filePath) || '';
 
   const rootKind = isPipelineRoot(rootText) ? 'pipeline' : 'local';
   const rootParams = parseParameters(rootText);
@@ -407,27 +344,113 @@ function buildFileGraph(filePath, workspaceRoot) {
     filePath,
     paramCount: rootParams.length,
     requiredCount: rootParams.filter(p => p.required).length,
-    isScope: true,   // marks this as the "scoped" focal node
+    isScope: true,
   });
 
-  // ── Downstream: direct children (templates called by this file) ───────────
-  const repoAliases = parseRepositoryAliases(rootText);
-  const refs = extractTemplateRefs(filePath);
+  // ── Downstream BFS ────────────────────────────────────────────────────────
+  // Queue entries: { filePath, currentDepth }
+  /** @type {{ fp: string, d: number }[]} */
+  let downQueue = [{ fp: filePath, d: 0 }];
+  /** @type {Set<string>} visited set to avoid re-processing */
+  const downVisited = new Set([filePath]);
 
-  for (const { templateRef } of refs) {
-    if (/\$\{/.test(templateRef) || /\$\(/.test(templateRef)) continue;
-    const resolved = resolveTemplatePath(templateRef, filePath, repoAliases);
-    if (!resolved) continue;
-    _addResolvedRef(filePath, templateRef, filePath, resolved, nodeMap, edges, edgeKeys, 'downstream', workspaceRoot);
+  while (downQueue.length > 0) {
+    const next = [];
+    for (const { fp: curFile, d: curDepth } of downQueue) {
+      if (curDepth >= maxDepth) continue;
+
+      const curText = fileCache.readFile(curFile);
+      if (!curText) continue;
+
+      const repoAliases = parseRepositoryAliases(curText);
+      const refs = extractTemplateRefs(curFile);
+
+      for (const { templateRef } of refs) {
+        if (/\$\{/.test(templateRef) || /\$\(/.test(templateRef)) continue;
+
+        const resolved = resolveTemplatePath(templateRef, curFile, repoAliases);
+        if (!resolved) continue;
+
+        let targetId;
+        let edgeLabel;
+
+        if (resolved.unknownAlias) {
+          targetId = `UNKNOWN_ALIAS:${resolved.alias}:${templateRef}`;
+          if (!nodeMap.has(targetId)) {
+            nodeMap.set(targetId, {
+              id: targetId,
+              label: path.basename(templateRef.split('@')[0]),
+              kind: 'unknown',
+              alias: resolved.alias,
+              paramCount: 0,
+              requiredCount: 0,
+            });
+          }
+          edgeLabel = `@${resolved.alias}`;
+        } else {
+          const { filePath: resolvedPath, repoName, alias } = resolved;
+          if (!resolvedPath) continue;
+
+          if (!fileCache.fileExists(resolvedPath)) {
+            targetId = `MISSING:${resolvedPath}`;
+            if (!nodeMap.has(targetId)) {
+              nodeMap.set(targetId, {
+                id: targetId,
+                label: path.basename(resolvedPath),
+                relativePath: path.relative(workspaceRoot, resolvedPath).replace(/\\/g, '/'),
+                kind: 'missing',
+                filePath: resolvedPath,
+                repoName,
+                paramCount: 0,
+                requiredCount: 0,
+              });
+            }
+          } else {
+            targetId = resolvedPath;
+            _ensureFileNode(resolvedPath, workspaceRoot, nodeMap, repoName || null);
+
+            // Upgrade to external if referenced via alias
+            const existingNode = nodeMap.get(targetId);
+            if (repoName && existingNode.kind !== 'external') {
+              existingNode.kind = 'external';
+              existingNode.repoName = repoName;
+            }
+
+            if (alias && alias !== 'self') edgeLabel = `@${alias}`;
+
+            // Enqueue for further BFS if not yet visited
+            if (!downVisited.has(resolvedPath)) {
+              downVisited.add(resolvedPath);
+              next.push({ fp: resolvedPath, d: curDepth + 1 });
+            }
+          }
+        }
+
+        // Add downstream edge: curFile → target
+        const edgeKey = `${curFile}→${targetId}`;
+        if (!edgeKeys.has(edgeKey)) {
+          edgeKeys.add(edgeKey);
+          const edge = { source: curFile, target: targetId, direction: 'downstream' };
+          if (edgeLabel) edge.label = edgeLabel;
+          edges.push(edge);
+        }
+      }
+    }
+    downQueue = next;
   }
 
-  // ── Upstream: find all workspace YAML files that reference this file ───────
+  // ── Upstream BFS ──────────────────────────────────────────────────────────
+  // Build a reverse adjacency map: targetFilePath → Set<callerFilePath>
+  // We scan all workspace YAML files once and build the full reverse map,
+  // then BFS upward from filePath.
   const allYaml = collectYamlFiles(workspaceRoot);
-  for (const callerFile of allYaml) {
-    if (callerFile === filePath) continue;
 
-    let callerText = '';
-    try { callerText = fs.readFileSync(callerFile, 'utf8'); } catch { continue; }
+  /** @type {Map<string, Set<string>>} targetPath → set of callerPaths */
+  const reverseAdj = new Map();
+
+  for (const callerFile of allYaml) {
+    const callerText = fileCache.readFile(callerFile);
+    if (!callerText) continue;
 
     const callerAliases = parseRepositoryAliases(callerText);
     const callerRefs = extractTemplateRefs(callerFile);
@@ -435,43 +458,76 @@ function buildFileGraph(filePath, workspaceRoot) {
     for (const { templateRef } of callerRefs) {
       if (/\$\{/.test(templateRef) || /\$\(/.test(templateRef)) continue;
       const resolved = resolveTemplatePath(templateRef, callerFile, callerAliases);
-      if (!resolved) continue;
+      if (!resolved || resolved.unknownAlias || !resolved.filePath) continue;
 
-      // Only care about refs that resolve to our focal file
-      const resolvedPath = resolved.filePath;
-      if (!resolvedPath || resolvedPath !== filePath) continue;
+      const targetPath = resolved.filePath;
+      if (!reverseAdj.has(targetPath)) reverseAdj.set(targetPath, new Set());
+      reverseAdj.get(targetPath).add(callerFile);
 
-      // Ensure the caller node exists
-      if (!nodeMap.has(callerFile)) {
-        const callerKind = isPipelineRoot(callerText) ? 'pipeline' : 'local';
-        let callerParamCount = 0;
-        let callerRequiredCount = 0;
-        try {
-          const callerParams = parseParameters(callerText);
-          callerParamCount = callerParams.length;
-          callerRequiredCount = callerParams.filter(p => p.required).length;
-        } catch { /* ignore */ }
-
-        nodeMap.set(callerFile, {
-          id: callerFile,
-          label: path.basename(callerFile),
-          relativePath: path.relative(workspaceRoot, callerFile).replace(/\\/g, '/'),
-          kind: callerKind,
-          filePath: callerFile,
-          paramCount: callerParamCount,
-          requiredCount: callerRequiredCount,
-        });
-      }
-
-      // Add upstream edge: caller → focal file
-      const edgeKey = `${callerFile}→${filePath}`;
-      if (!edgeKeys.has(edgeKey)) {
-        edgeKeys.add(edgeKey);
-        const edge = { source: callerFile, target: filePath, direction: 'upstream' };
-        if (resolved.alias && resolved.alias !== 'self') edge.label = `@${resolved.alias}`;
-        edges.push(edge);
+      // Store the alias label on the edge later — keep a lookup map
+      // key: "callerFile→targetPath", value: alias label
+      const edgeInfoKey = `${callerFile}→${targetPath}`;
+      if (resolved.alias && resolved.alias !== 'self') {
+        // We'll look this up when adding edges below
+        reverseAdj._edgeLabels = reverseAdj._edgeLabels || new Map();
+        reverseAdj._edgeLabels.set(edgeInfoKey, `@${resolved.alias}`);
       }
     }
+  }
+
+  const edgeLabels = reverseAdj._edgeLabels || new Map();
+
+  /** @type {{ fp: string, d: number }[]} */
+  let upQueue = [{ fp: filePath, d: 0 }];
+  const upVisited = new Set([filePath]);
+
+  while (upQueue.length > 0) {
+    const next = [];
+    for (const { fp: curTarget, d: curDepth } of upQueue) {
+      if (curDepth >= maxDepth) continue;
+
+      const callers = reverseAdj.get(curTarget) || new Set();
+      for (const callerFile of callers) {
+        // Ensure caller node exists
+        if (!nodeMap.has(callerFile)) {
+          const callerText = fileCache.readFile(callerFile) || '';
+          const callerKind = isPipelineRoot(callerText) ? 'pipeline' : 'local';
+          let callerParamCount = 0;
+          let callerRequiredCount = 0;
+          if (callerText) {
+            const callerParams = parseParameters(callerText);
+            callerParamCount = callerParams.length;
+            callerRequiredCount = callerParams.filter(p => p.required).length;
+          }
+
+          nodeMap.set(callerFile, {
+            id: callerFile,
+            label: path.basename(callerFile),
+            relativePath: path.relative(workspaceRoot, callerFile).replace(/\\/g, '/'),
+            kind: callerKind,
+            filePath: callerFile,
+            paramCount: callerParamCount,
+            requiredCount: callerRequiredCount,
+          });
+        }
+
+        // Add upstream edge: callerFile → curTarget
+        const edgeKey = `${callerFile}→${curTarget}`;
+        if (!edgeKeys.has(edgeKey)) {
+          edgeKeys.add(edgeKey);
+          const edge = { source: callerFile, target: curTarget, direction: 'upstream' };
+          const lbl = edgeLabels.get(edgeKey);
+          if (lbl) edge.label = lbl;
+          edges.push(edge);
+        }
+
+        if (!upVisited.has(callerFile)) {
+          upVisited.add(callerFile);
+          next.push({ fp: callerFile, d: curDepth + 1 });
+        }
+      }
+    }
+    upQueue = next;
   }
 
   return {
